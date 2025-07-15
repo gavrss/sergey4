@@ -1,6 +1,6 @@
 databaseType = "SqlServer"
 id = "7a5f3835-34c0-4e53-83c4-2aad607f9a96"
-name = "sergey-flyway-3"
+name = "sergey4"
 
 [flyway]
 defaultSchema = "dbo"
