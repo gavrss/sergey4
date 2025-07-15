@@ -23,6 +23,9 @@ mode = "all"
 developmentEnvironment = "development"
 shadowEnvironment = "shadow"
 
+  [flywayDesktop.generate]
+  undoScripts = false
+
 [redgateCompare]
 filterFile = "filter.rgf"
 
