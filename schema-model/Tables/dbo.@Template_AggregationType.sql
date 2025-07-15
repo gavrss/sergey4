@@ -4,7 +4,8 @@ CREATE TABLE [dbo].[@Template_AggregationType]
 [AggregationTypeID] [int] NOT NULL,
 [AggregationTypeName] [nvarchar] (50) NOT NULL,
 [AggregationTypeDescription] [nvarchar] (255) NOT NULL,
-[Version] [nvarchar] (100) NOT NULL CONSTRAINT [DF_AggregationType_Version] DEFAULT ('')
+[Version111] [nvarchar] (100) NOT NULL CONSTRAINT [DF_AggregationType_Version] DEFAULT (''),
+[SomeExtraColumn] [nchar] (10) NULL
 )
 GO
 SET QUOTED_IDENTIFIER ON

@@ -6,7 +6,7 @@ GO
 CREATE PROCEDURE [dbo].[CollectAllQueries] AS
 BEGIN
     SET NOCOUNT ON;
-
+	-- test comment
 SELECT
 	 server_name = 'dspProd02'
 	,database_name = 'pcINTEGRATOR'
