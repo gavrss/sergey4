@@ -1,0 +1,19 @@
+[environments.development]
+url = "jdbc:sqlserver://10.10.1.105;authentication=sqlPassword;databaseName=pcIntegrator_Dev_Copy;encrypt=true;trustServerCertificate=true"
+user = "sega"
+password = "${localSecret.Flyway Desktop c04ba5f9-db87-4fd6-926a-bc1af8afe635}"
+displayName = "Development database"
+
+[environments.shadow]
+url = "jdbc:sqlserver://10.10.1.105;authentication=sqlPassword;databaseName=pcIntegrator_Shadow;encrypt=true;trustServerCertificate=true"
+user = "sega"
+password = "${localSecret.Flyway Desktop 4617e6e2-d265-489b-80f1-8e410871a82b}"
+displayName = "Shadow database"
+provisioner = "backup"
+
+[environments.shadow.resolvers.backup]
+backupVersion = "000"
+backupFilePath = "\\\\DSPBETA01\\BackupTemp$\\pcIntegrator_Copy.bak"
+
+  [environments.shadow.resolvers.backup.sqlserver]
+  generateWithMove = true

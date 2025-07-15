@@ -1,0 +1,2354 @@
+SET QUOTED_IDENTIFIER ON
+GO
+SET ANSI_NULLS ON
+GO
+CREATE PROCEDURE [dbo].[spPortalGet_DataClass_Data_New3_1]
+	@UserID int = NULL,
+	@InstanceID int = NULL,
+	@VersionID int = NULL,
+
+	--SP-specific parameters
+	@DataClassID int = NULL,
+	@CallistoDatabase nvarchar(100) = NULL,
+	@Filter nvarchar(max) = NULL,
+	@ResultTypeBM int = NULL, --1 = Filter, 2 = Filter rows, 4 = Data - Leaf level, 8 = Changeable, 16 = Last Actor UserID, 32 = LineItem, 64 = Comment, 128=Add column LineItemYN to ResultTypeBM = 4, 256=List definition, 512=Hierarchy
+
+--	@MasterDataClassID int = NULL, --If set @DataClassID is of type SpreadingKey
+
+	@GroupBy nvarchar(1024) = NULL,
+	@Measure nvarchar(1024) = NULL,
+	@Tuple nvarchar(max) = NULL,
+	@RowList nvarchar(max) = NULL, --Only valid for @ResultTypeBM=4, 8, 256 and 512
+
+/* Separators:
+	#Tuple = ObjectReference, (TupleName)
+	Semicolon ; (59) = Separator between different tuples
+	Pipe | (124) = Separator between different objects
+	Dot . (46) = After dot, reference to property
+	Colon : (58) = After colon, reference to hierarchy, if numeric reference to HierarchyNo, else to HierarchyName
+	Comma , (44) = Separator between different filter members of same object type
+*/
+
+	@PropertyList nvarchar(1024) = NULL,
+	@DimensionList nvarchar(1024) = NULL,
+	@Hierarchy nvarchar(1024) = NULL, --Only for backwards compatibility (not valid for tuples). Use colon in filterstring.
+	@FilterLevel64 nvarchar(3) = NULL, --Valid for ResultTypeBM = 64 and 128; L=LeafLevel, P=Parent, LF=LevelFilter (not up or down), LLF=LevelFilter + all members below
+	@OnlyDataClassDimMembersYN bit = 1, --Valid for @ResultTypeBM = 2
+	@Parent_MemberKey nvarchar(1024) = NULL, --Valid for @ResultTypeBM = 2, Sample: 'GL_Student_ID=All_' Separator=|
+
+	@ActingAs int = NULL, --Optional (OrganizationPositionID)
+	@AssignmentID int = NULL,
+	@WorkFlowStateID int = NULL,
+	@OnlySecuredDimYN bit = 0,
+	@ShowAllMembersYN bit = 0,
+	@UseCacheYN bit = 1,
+
+	@JobID int = NULL,
+	@JobLogID int = NULL,
+	@SetJobLogYN bit = 1,
+	@AuthenticatedUserID int = NULL,
+	@Rows int = NULL,
+	@ProcedureID int = 880000209,
+	@StartTime datetime = NULL,
+	@Duration time(7) = '00:00:00' OUT,
+	@Deleted int = 0 OUT,
+	@Inserted int = 0 OUT,
+	@Updated int = 0 OUT,
+	@Selected int = 0 OUT,
+	@GetVersion bit = 0,
+	@Debug bit = 0, --1=Set @DebugBM to 3
+	@DebugBM int = 0 --1=High Prio, 2=Low Prio, 4=Sub routines, 8=Large tables, 16=Execution time, 32=Special purpose
+
+--#WITH ENCRYPTION#--
+
+AS
+/*
+EXEC [spRun_Procedure_KeyValuePair] @ProcedureName='spPortalGet_DataClass_Data', @JSON='[{"TKey" : "DebugBM", "TValue" : "15"},
+{"TKey" : "UserID", "TValue" : "10427"},{"TKey" : "InstanceID", "TValue" : "587"},{"TKey" : "VersionID", "TValue" : "1088"},{"TKey" : "DataClassID", "TValue" : "5773"}
+,{"TKey" : "ResultTypeBM", "TValue" : "4"},{"TKey" : "GroupBy", "TValue" : "Time|FullAccount"},{"TKey" : "Measure", "TValue" : "Financials"}
+,{"TKey" : "Filter", "TValue" : "TimeView=Periodic|Account=Income_Statement_|Flow=All_|BusinessProcess=CONSOLIDATED|BusinessRule=All_|Currency=All_|Entity=CTS|Scenario=ACTUAL|Time=2022|Version=NONE|GL_Business_Segment=All_|GL_Department=All_|GL_Location=All_|FullAccount=All_"}
+,{"TKey" : "UseCacheYN", "TValue" : "true"}]'
+
+EXEC [spRun_Procedure_KeyValuePair] @ProcedureName='spPortalGet_DataClass_Data', @JSON='[{"TKey" : "DebugBM", "TValue" : "0"},
+{"TKey" : "UserID", "TValue" : "9938"},{"TKey" : "InstanceID", "TValue" : "576"},{"TKey" : "VersionID", "TValue" : "1082"},{"TKey" : "DataClassID", "TValue" : "5722"},
+{"TKey" : "Filter", "TValue" : "Group=NONE|GL_Posted=TRUE|Account=Income_Statement_|Flow=All_|BusinessProcess=CONSOLIDATED|BusinessRule=All_|TimeView=Periodic|Currency=All_|Entity=101|Scenario=ACTUAL|Time=FY2021|Version=NONE|LineItem=All_|GL_Department=All_|GL_Functional_Area=All_|GL_Geographic_Loc=All_|GL_Intercompany=All_|GL_Product_Line=All_|FullAccount=All_"}
+,{"TKey" : "Tuple", "TValue" : "#Tuple=actual-202010|Time=202010|Scenario=ACTUAL"},{"TKey" : "RowList", "TValue" : "FullAccount:1=RouterSales,WJSales"},{"TKey" : "ResultTypeBM", "TValue" : "256"},{"TKey" : "UseCacheYN", "TValue" : "true"}]'
+
+EXEC [spRun_Procedure_KeyValuePair] @ProcedureName='spPortalGet_DataClass_Data', @JSON='[{"TKey" : "DebugBM", "TValue" : "15"},
+{"TKey" : "UserID", "TValue" : "9938"},{"TKey" : "InstanceID", "TValue" : "576"},{"TKey" : "VersionID", "TValue" : "1082"},{"TKey" : "DataClassID", "TValue" : "5722"},
+{"TKey" : "Filter", "TValue" : "Group=NONE|GL_Posted=TRUE|Account=Income_Statement_|Flow=All_|BusinessProcess=CONSOLIDATED|BusinessRule=All_|TimeView=Periodic|Currency=All_|Entity=101|Scenario=ACTUAL|Time=FY2022|Version=NONE|LineItem=All_|GL_Department=All_|GL_Functional_Area=All_|GL_Geographic_Loc=All_|GL_Intercompany=All_|GL_Product_Line=All_|FullAccount:1=RouterSales"}
+,{"TKey" : "Tuple", "TValue" : "#Tuple=months-202110|Time=202110|Scenario=ACTUAL;#Tuple=months-202111|Time=202111|Scenario=ACTUAL;#Tuple=months-202112|Time=202112|Scenario=ACTUAL;#Tuple=months-202201|Time=202201|Scenario=ACTUAL;#Tuple=months-202202|Time=202202|Scenario=ACTUAL;#Tuple=months-202203|Time=202203|Scenario=ACTUAL;#Tuple=months-202204|Time=202204|Scenario=ACTUAL;#Tuple=months-202205|Time=202205|Scenario=ACTUAL;#Tuple=months-202206|Time=202206|Scenario=ACTUAL;#Tuple=months-202207|Time=202207|Scenario=ACTUAL;#Tuple=months-202208|Time=202208|Scenario=ACTUAL;#Tuple=months-202209|Time=202209|Scenario=ACTUAL"}
+,{"TKey" : "RowList", "TValue" : "FullAccount:1=WJSales,RouterSales"},{"TKey" : "ResultTypeBM", "TValue" : "256"},{"TKey" : "UseCacheYN", "TValue" : "false"}]'
+
+EXEC [pcINTEGRATOR].[dbo].[spPortalGet_DataClass_Data] 
+@ActingAs='12600',@DataClassID='18073',@Filter='TimeView=Periodic|BaseCurrency=USD|BusinessRule=NONE|Currency=All_|Entity=NONE|Rate=All_|Scenario=ACTUAL|Simulation=NONE|Time=2022',
+@GroupBy='Time|Currency|Rate',@InstanceID='-1590',@ResultTypeBM='512',@RowList='SupressZeroYN=0|Currency=All_',
+@Tuple='#Tuple=actual-202201|Scenario=ACTUAL|Time=202201;#Tuple=actual-202202|Scenario=ACTUAL|Time=202202;#Tuple=actual-202203|Scenario=ACTUAL|Time=202203;#Tuple=actual-202204|Scenario=ACTUAL|Time=202204;#Tuple=actual-202205|Scenario=ACTUAL|Time=202205;#Tuple=actual-202206|Scenario=ACTUAL|Time=202206;#Tuple=actual-202207|Scenario=ACTUAL|Time=202207;#Tuple=actual-202208|Scenario=ACTUAL|Time=202208;#Tuple=actual-202209|Scenario=ACTUAL|Time=202209;#Tuple=actual-202210|Scenario=ACTUAL|Time=202210;#Tuple=actual-202211|Scenario=ACTUAL|Time=202211;#Tuple=actual-202212|Scenario=ACTUAL|Time=202212'
+,@UseCacheYN='false',@UserID='18518',@VersionID='-1590',@DebugBM=15
+
+--ResultTypeBM=4
+EXEC [pcINTEGRATOR].[dbo].[spPortalGet_DataClass_Data_New]
+	@UserID='26881',
+	@InstanceID='574',
+	@VersionID='1081',
+	@ActingAs='11247',
+	@DataClassID='5718',
+	@Filter='Account=All_|Flow=All_|BusinessProcess=CONSOLIDATED|BusinessRule=All_|Currency=USD|Entity=All_|Scenario=Actual|Time=2021|Version=NONE|GL_Department=All_|GL_Entity=All_|GL_Interco=All_|GL_Organization=All_|FullAccount=I_',
+	@GroupBy='Time.TimeYear|FullAccount',
+	@ResultTypeBM=4,
+	@UseCacheYN=0,
+	@DebugBM=0
+
+--ResultTypeBM=256
+EXEC [pcINTEGRATOR].[dbo].[spPortalGet_DataClass_Data_New]
+	@UserID='-10',
+	@InstanceID='561',
+	@VersionID='1071',
+	@ActingAs='-10',
+	@DataClassID='5665',
+	@Filter='Account=All_|Flow=All_|BusinessProcess=CONSOLIDATED|BusinessRule=All_|Currency=CDN|Entity=EFP|Scenario=Actual|Version=NONE|GL_Department=All_|GL_Reference=All_|Time=FY2021,FY2022',
+	@Tuple= '#Tuple=202106 YTD|Time=202106|TimeView=YTD;#Tuple=2021 July|Time=202107;#Tuple=202108|Time=202108;#Tuple=202109|Time=202109;#Tuple=202110|Time=202110;#Tuple=202111|Time=202111;#Tuple=202112|Time=202112;#Tuple=202201|Time=202201;#Tuple=202202|Time=202202;#Tuple=202203|Time=202203;#Tuple=202204|Time=202204;#Tuple=202205|Time=202205;#Tuple=202206|Time=202206;#Tuple=FY2022|Time=FY2022;#Tuple=202205 Budget|Time=202205|Scenario=BUDGET',
+	@RowList='FullAccount:Income=LS,SE,FX,CS,SS,OS,OI,AC_SALES_REV,INV_Lum,INV_log,WL,Ops,GA,Amort,Int',
+	@ResultTypeBM=256,
+	@UseCacheYN=0,
+	@DebugBM=0
+
+--ResultTypeBM=512
+EXEC [pcINTEGRATOR].[dbo].[spPortalGet_DataClass_Data_New]
+	@UserID='-10',
+	@InstanceID='561',
+	@VersionID='1071',
+	@ActingAs='-10',
+	@DataClassID='5665',
+	@Filter='Account=All_|Flow=All_|BusinessProcess=CONSOLIDATED|BusinessRule=All_|Currency=CDN|Entity=EFP|Scenario=Actual|Version=NONE|GL_Department=All_|GL_Reference=All_|Time=FY2021,FY2022',
+	@Tuple= '#Tuple=202106 YTD|Time=202106|TimeView=YTD;#Tuple=2021 July|Time=202107;#Tuple=202108|Time=202108;#Tuple=202109|Time=202109;#Tuple=202110|Time=202110;#Tuple=202111|Time=202111;#Tuple=202112|Time=202112;#Tuple=202201|Time=202201;#Tuple=202202|Time=202202;#Tuple=202203|Time=202203;#Tuple=202204|Time=202204;#Tuple=202205|Time=202205;#Tuple=202206|Time=202206;#Tuple=FY2022|Time=FY2022;#Tuple=202205 Budget|Time=202205|Scenario=BUDGET',
+	@RowList='FullAccount:Income=All_',
+	@ResultTypeBM=512,
+	@UseCacheYN=0,
+	@DebugBM=3
+
+EXEC [spPortalGet_DataClass_Data] @GetVersion = 1
+*/
+
+SET ANSI_WARNINGS OFF
+
+DECLARE
+	--SP-specific variables
+	@SQLStatement NVARCHAR(MAX),
+	@DataClassName NVARCHAR(100),
+	@DimensionID INT,
+	@DimensionName NVARCHAR(100),
+	@HierarchyName NVARCHAR(100),
+	@EqualityString NVARCHAR(10),
+	@LeafLevelFilter NVARCHAR(MAX),
+	@StepReference NVARCHAR(20) = 'GetData',
+	@SQL_Select1 NVARCHAR(1000) = '',
+	@SQL_Select2 NVARCHAR(1000) = '',
+	@SQL_Join2 NVARCHAR(2000) = '',
+	@SQL_Join_RLC NVARCHAR(4000) = '',
+	@SQL_GroupBy1 NVARCHAR(1000) = '',
+	@SQL_GroupBy2 NVARCHAR(1000) = '',
+	@SQL_Where NVARCHAR(MAX) = '',
+	@SQL_Where_Tuple NVARCHAR(MAX) = '',
+	@SQL_Where_Total NVARCHAR(MAX) = '',
+	@SQL_MultiDimInsert NVARCHAR(1000) = '',
+	@SQL_MultiDimSelect NVARCHAR(1000) = '',
+	@SQL_MultiDimJoin NVARCHAR(2000) = '',
+	@SQL_Tuple NVARCHAR(MAX) = '',
+
+	@SQLSelect32 NVARCHAR(2000) = '',
+	@SQLSelect32_LIT NVARCHAR(2000) = '',
+	@SQLSelect32_S NVARCHAR(2000) = '',
+	@SQLSelect32_DC NVARCHAR(2000) = '',
+	@SQLSelect32_Sub NVARCHAR(2000) = '',
+	@SQLJoin_LIT NVARCHAR(2000) = '',
+	@SQLJoin_T NVARCHAR(2000) = '',
+	@SQLGroupBy32_LIT NVARCHAR(2000) = '',
+	@SQLJoin32_Sub NVARCHAR(2000) = '',
+	@SQLJoin32_Callisto NVARCHAR(4000) = '',
+	@LineItemBP BIGINT = 118,
+	@TmpGlobalTable VARCHAR(100) = '[##DC_' + CONVERT(VARCHAR(36),NEWID()) +']',
+	@TmpGlobalTable_2 VARCHAR(100) = '[##DC_' + CONVERT(VARCHAR(36),NEWID()) +'_2]',
+	@TmpGlobalTable_32 VARCHAR(100) = '[##DC_' + CONVERT(VARCHAR(36),NEWID()) +'_32]',
+	@TmpGlobalTable_Text VARCHAR(100) = '[##DC_' + CONVERT(VARCHAR(36),NEWID()) +'_Text]',
+	@TupleNo INT,
+	@TupleName NVARCHAR(50),
+	@YearMonthColumn NVARCHAR(100),
+	@MultiDimYN BIT = 0,
+	@PipeString NVARCHAR(MAX),
+	@TimeFilter NVARCHAR(MAX),
+	@TimeFilterTuple NVARCHAR(MAX),
+	@TimeFilterTupleString NVARCHAR(MAX),
+	@TimeFilterString NVARCHAR(MAX),
+	@TimeProperty NVARCHAR(50),
+	@MinRowOrder INT,
+	@MinTimeMemberId BIGINT,
+	@TimePresentation NVARCHAR(1000),
+	@TimePropertyName nvarchar(50),
+	@DimensionTypeID int,
+	@StorageTypeBM int,
+	@PropertyName nvarchar(100),
+	@RowListMemberKey nvarchar(100),
+	@SortOrder int,
+	@HierarchyDimension nvarchar(100),
+	@HierarchyHierarchy nvarchar(100),
+	@HierarchyTopMember nvarchar(100),
+--	@HierarchySortOrder nvarchar(10),
+
+	@RowList_DimensionID int,
+	@RowList_SupressZeroYN bit = 1,
+	@RowList_ShowLevel int = 0, --0 shows all levels, otherwise show down to selected level
+	@RowList_ExcludeStartNodeYN bit = 0,
+	@RowList_ExcludeSumMemberYN bit = 0,
+	@RowList_ParentSorting nvarchar(10) = 'Before', --'Before', 'After'
+
+	@MemberId bigint,
+	@Level int,
+	@AggregationSet nvarchar(4000) = '',
+	@AggregationSum nvarchar(4000) = '',
+	@SupressZeroString nvarchar(4000) = '',
+
+	@CategoryYN bit = 0,
+	@LoopNo int = 0,
+	@TimeDimensionTypeID int,
+	@WorkflowStateYN bit,
+	@TimeView nvarchar(20),
+	@TimeTableYN bit,
+
+	@MeasureName nvarchar(100),
+	@SQLMeasureList_8 nvarchar(max) = '',
+	@DataClassTypeID int,
+	@StorageTypeBM_DataClass int,
+	@AddScenarioYN bit,
+	@TimeType nvarchar(10),
+
+	@Step nvarchar(255),
+	@Message nvarchar(500) = '',
+	@Severity int = 0,
+	@UserName nvarchar(100),
+	@DatabaseName nvarchar(100),
+	@ProcedureName nvarchar(100),
+	@DebugSub bit = 0,
+	@ErrorNumber int = 0,
+	@ErrorSeverity int,
+	@ErrorState int,
+	@ErrorProcedure nvarchar(128),
+	@ErrorLine int,
+	@ErrorMessage nvarchar(4000), 
+	@ProcedureDescription nvarchar(1024),
+	@MandatoryParameter nvarchar(1000),
+	@Description nvarchar(255),
+	@ToBeChanged nvarchar(255) = '',
+	@CreatedBy nvarchar(50) = 'JaWo',
+	@ModifiedBy nvarchar(50) = 'JaWo',
+	@Version nvarchar(50) = '2.1.2.2187'
+
+IF @GetVersion <> 0
+	BEGIN
+		SELECT
+			@DatabaseName = DB_NAME(),
+			@ProcedureName = OBJECT_NAME(@@PROCID),
+			@ProcedureDescription = 'Return data for reports in different formats.',
+			@MandatoryParameter = '' --Without @, separated by |
+
+		IF @Version = '2.1.2.2179' SET @Description = 'Procedure created.'
+		IF @Version = '2.1.2.2180' SET @Description = 'Implement parameter @Tuple.'
+		IF @Version = '2.1.2.2181' SET @Description = 'Implement readaccess'
+		IF @Version = '2.1.2.2182' SET @Description = 'Modify query for setting [WorkflowStateID] in @ResultTypeBM 4. Handle Lineitem.'
+		IF @Version = '2.1.2.2183' SET @Description = 'Modified handling of DimensionID -77 in ResultTypeBM=2. Added @SQL_Join2 when inserting into @TmpGlobalTable_2 in ResultTypeBM = 512.'
+		IF @Version = '2.1.2.2187' SET @Description = 'Handle @ResultTypeBM=8 and other bugfixes. Improved handling of TimeDay. Fixed bug regarding WorkflowState in ResultTypeBM=8.'
+
+		EXEC [pcINTEGRATOR].[dbo].[spSet_Procedure]	@CalledInstanceID=@InstanceID, @CalledVersionID=@VersionID, @CalledProcedureID=@ProcedureID, @CalledDatabaseName=@DatabaseName, @CalledProcedureName=@ProcedureName, @CalledProcedureDescription=@ProcedureDescription, @CalledMandatoryParameter=@MandatoryParameter, @CalledVersion=@Version, @CalledVersionDescription=@Description, @CalledCreatedBy=@CreatedBy, @CalledModifiedBy=@ModifiedBy, @JobID=@ProcedureID
+		RETURN
+	END
+
+SET NOCOUNT ON 
+
+BEGIN TRY
+	SET @Step = 'Set @StartTime'
+		SET @StartTime = ISNULL(@StartTime, GETDATE())
+
+	SET @Step = 'Set procedure variables'
+		SELECT
+			@JobID = ISNULL(@JobID, @ProcedureID),
+			@DatabaseName = DB_NAME(),
+			@ProcedureName = OBJECT_NAME(@@PROCID),
+			@Deleted = ISNULL(@Deleted, 0),
+			@Inserted = ISNULL(@Inserted, 0),
+			@Updated = ISNULL(@Updated, 0),
+			@Selected = ISNULL(@Selected, 0)
+
+		EXEC [pcINTEGRATOR].[dbo].[spGet_User] @UserID = @UserID, @UserName = @UserName OUT, @JobID = @JobID			
+		SET @UserName = ISNULL(@UserName, suser_name())
+
+		IF @Debug <> 0 AND @DebugBM = 0 SET @DebugBM = 3
+		IF @Debug = 0 AND @DebugBM & 3 > 0 SET @Debug = 1
+		IF @DebugBM & 4 > 0 SET @DebugSub = 1
+
+		IF @CallistoDatabase IS NULL
+			SELECT
+				@CallistoDatabase = [DestinationDatabase]
+			FROM
+				[pcINTEGRATOR_Data].[dbo].[Application]
+			WHERE
+				[InstanceID] = @InstanceID AND
+				[VersionID] = @VersionID AND
+				[SelectYN] <> 0
+
+		SELECT
+			@DataClassName = [DataClassName],
+			@Measure = ISNULL(@Measure, [DataClassName]),
+			@DataClassTypeID = [DataClassTypeID],
+			@StorageTypeBM_DataClass = [StorageTypeBM]
+		FROM
+			[pcINTEGRATOR_Data].[dbo].[DataClass]
+		WHERE
+			[InstanceID] = @InstanceID AND
+			[VersionID] = @VersionID AND
+			[DataClassID] = @DataClassID AND
+			[SelectYN] <> 0 AND
+			[DeletedID] IS NULL
+
+		IF @DataClassName IS NULL
+			BEGIN
+				SET @Message = '@DataClassID = ' + CONVERT(nvarchar(15), @DataClassID) + ' does not match @InstanceID = ' + CONVERT(nvarchar(15), @InstanceID) + ' and @VersionID = ' + CONVERT(nvarchar(15), @VersionID) + '.'
+				SET @Severity = 0
+				GOTO EXITPOINT
+			END
+
+		SELECT @TimeType = CASE WHEN (SELECT COUNT(1) FROM pcINTEGRATOR_Data..DataClass_Dimension WHERE [InstanceID] = @InstanceID AND [VersionID] = @VersionID AND [DataClassID] = @DataClassID AND [DimensionID] IN (-49)) > 0 THEN 'TimeDay' ELSE 'Time' END
+
+		IF @DebugBM & 2 > 0 SELECT [@TimeType] = @TimeType
+
+		IF @DebugBM & 2 > 0
+			SELECT
+				[@UserID]=@UserID,
+				[@InstanceID]=@InstanceID,
+				[@VersionID]=@VersionID,
+				[@DataClassID]=@DataClassID,
+				[@DataClassName] = @DataClassName,
+				[@Measure] = @Measure,
+				[@CallistoDatabase] = @CallistoDatabase,
+				[@PropertyList]=@PropertyList,
+				[@AssignmentID]=@AssignmentID,
+				[@DimensionList]=@DimensionList,
+				[@OnlySecuredDimYN]=@OnlySecuredDimYN,
+				[@ShowAllMembersYN]=@ShowAllMembersYN,
+				[@OnlyDataClassDimMembersYN]=@OnlyDataClassDimMembersYN,
+				[@Parent_MemberKey]=@Parent_MemberKey,
+				[@Selected]=@Selected,
+				[@JobID]=@JobID,
+				[@Debug]=@DebugSub
+
+
+	SET @Step = 'Create temp tables'
+		IF OBJECT_ID(N'TempDB.dbo.#PipeStringSplit', N'U') IS NULL
+			CREATE TABLE #PipeStringSplit
+				(
+				[TupleNo] int,
+				[PipeObject] nvarchar(100) COLLATE DATABASE_DEFAULT,
+				[EqualityString] nvarchar(10) COLLATE DATABASE_DEFAULT,
+				[PipeFilter] nvarchar(max) COLLATE DATABASE_DEFAULT
+				)
+
+		IF OBJECT_ID(N'TempDB.dbo.#FilterTable', N'U') IS NULL
+			CREATE TABLE #FilterTable
+				(
+				[StepReference] nvarchar(20) COLLATE DATABASE_DEFAULT,
+				[TupleNo] int,
+				[DimensionID] int,
+				[DimensionName] nvarchar(100) COLLATE DATABASE_DEFAULT,
+				[DimensionTypeID] int,
+				[StorageTypeBM] int,
+				[MultiDimIncludedYN] bit DEFAULT 0,
+				[SortOrder] int,
+				[ObjectReference] nvarchar(100) COLLATE DATABASE_DEFAULT,
+				[HierarchyName] nvarchar(100) COLLATE DATABASE_DEFAULT,
+				[PropertyName] nvarchar(100) COLLATE DATABASE_DEFAULT,
+				[JournalColumn] nvarchar(50) COLLATE DATABASE_DEFAULT,
+				[EqualityString] nvarchar(10) COLLATE DATABASE_DEFAULT,
+				[Filter] nvarchar(max) COLLATE DATABASE_DEFAULT,
+				[LeafLevelFilter] nvarchar(max) COLLATE DATABASE_DEFAULT,
+				[PropertyFilter] nvarchar(max) COLLATE DATABASE_DEFAULT,
+				[Segment] nvarchar(20) COLLATE DATABASE_DEFAULT,
+				[Method] nvarchar(20) COLLATE DATABASE_DEFAULT
+				)
+
+		IF @Filter IS NOT NULL AND @Tuple IS NULL
+			SET @PipeString = @Filter
+		ELSE IF @Filter IS NOT NULL AND @Tuple IS NOT NULL
+			SET @PipeString = @Filter + ';' + @Tuple
+		ELSE IF @Filter IS NULL AND @Tuple IS NOT NULL
+			SET @PipeString = @Tuple
+
+		SET @PipeString = REPLACE(REPLACE(REPLACE(REPLACE(@PipeString, 'TimeView', 'TW12'), 'TimeDay', 'Time'), 'Time', @TimeType), 'TW12', 'TimeView')
+		
+		IF @DebugBM & 2 > 0 SELECT [@PipeString] = @PipeString
+		
+		EXEC pcINTEGRATOR.dbo.[spGet_FilterTable]
+			@UserID = @UserID,
+			@InstanceID = @InstanceID,
+			@VersionID = @VersionID,
+			@DataClassID = @DataClassID,
+			@PipeString = @PipeString,
+			@DatabaseName = @CallistoDatabase, --Mandatory
+			@StorageTypeBM_DataClass = 4, --3 returns _MemberKey, 4 returns _MemberId
+			@StorageTypeBM = NULL, --Mandatory
+			@StepReference = @StepReference,
+			@Hierarchy = @Hierarchy,
+			@Debug = @DebugSub
+
+		IF @DebugBM & 2 > 0 SELECT TempTable = '#FilterTable_1', * FROM #FilterTable WHERE [StepReference] = @StepReference ORDER BY [TupleNo], [SortOrder], [DimensionName]
+
+	SET @Step = '@ResultTypeBM & 768' --+ 32
+		--IF @ResultTypeBM & 768 > 0
+		IF @ResultTypeBM & 876 > 0
+			BEGIN
+				CREATE TABLE #RowListChildren
+					(
+					[DimensionID] int,
+					[DimensionName] nvarchar(100) COLLATE DATABASE_DEFAULT,
+					[RowList_MemberID] bigint,
+					[RowList_MemberKey] nvarchar(50) COLLATE DATABASE_DEFAULT,
+					[RowList_Description] nvarchar(100) COLLATE DATABASE_DEFAULT,
+					[Leaf_MemberId] bigint,
+					[SortOrder] int
+					)
+				
+				CREATE TABLE #FilterList
+					(
+					[SortOrder] int IDENTITY(1,1),
+					[Filter] nvarchar(100),
+					)
+		
+				EXEC pcINTEGRATOR.dbo.[spGet_FilterTable]
+					@UserID = @UserID,
+					@InstanceID = @InstanceID,
+					@VersionID = @VersionID,
+					@DataClassID = NULL,
+					@PipeString = @RowList,
+					@DatabaseName = @CallistoDatabase, --Mandatory
+					@StorageTypeBM_DataClass = 4, --3 returns _MemberKey, 4 returns _MemberId
+					@StorageTypeBM = NULL, --Mandatory
+					@StepReference = 'RowList',
+					@Hierarchy = @Hierarchy,
+					@Debug = @DebugSub
+
+				IF @DebugBM & 2 > 0
+					BEGIN
+						SELECT
+							TempTable = '#FilterTable (RowList)',
+							*
+						FROM
+							#FilterTable
+						WHERE
+							[StepReference] = 'RowList'
+
+						SELECT
+							TempTable = '#FilterTable (Total)',
+							*
+						FROM
+							#FilterTable
+					END
+
+				SELECT
+					@RowList_DimensionID = MAX([DimensionID])
+				FROM
+					#FilterTable
+				WHERE
+					[StepReference] = 'RowList' AND
+					[DimensionID] IS NOT NULL
+
+				SELECT
+					@RowList_SupressZeroYN = ISNULL(CASE [DimensionName] WHEN 'SupressZeroYN' THEN [Filter] END, @RowList_SupressZeroYN),
+					@RowList_ShowLevel = ISNULL(CASE [DimensionName] WHEN 'ShowLevel' THEN [Filter] END, @RowList_ShowLevel),
+					@RowList_ExcludeStartNodeYN = ISNULL(CASE [DimensionName] WHEN 'ExcludeStartNodeYN' THEN [Filter] END, @RowList_ExcludeStartNodeYN),
+					@RowList_ExcludeSumMemberYN = ISNULL(CASE [DimensionName] WHEN 'ExcludeSumMemberYN' THEN [Filter] END, @RowList_ExcludeSumMemberYN),
+					@RowList_ParentSorting = ISNULL(CASE [DimensionName] WHEN 'ParentSorting' THEN [Filter] END, @RowList_ParentSorting)
+				FROM
+					#FilterTable
+				WHERE
+					[StepReference] = 'RowList' AND
+					[DimensionName] IN ('SupressZeroYN', 'ShowLevel', 'ExcludeStartNodeYN', 'ExcludeSumMemberYN', 'ParentSorting')
+
+				DELETE #FilterTable WHERE [DimensionName] IN ('SupressZeroYN', 'ShowLevel', 'ExcludeStartNodeYN', 'ExcludeSumMemberYN', 'ParentSorting')
+
+				IF @DebugBM & 2 > 0 SELECT TempTable = '#FilterTable', * FROM #FilterTable WHERE [StepReference] = 'RowList'
+
+				IF CURSOR_STATUS('global','RowList_Cursor') >= -1 DEALLOCATE RowList_Cursor
+				DECLARE RowList_Cursor CURSOR FOR
+			
+					SELECT 
+						[DimensionID],
+						[DimensionName],
+						[DimensionTypeID],
+						[StorageTypeBM],
+						[HierarchyName],
+						[PropertyName],
+						[EqualityString],
+						[Filter]
+					FROM
+						#FilterTable
+					WHERE
+						[StepReference] = 'RowList'
+					ORDER BY
+						[DimensionID]
+
+					OPEN RowList_Cursor
+					FETCH NEXT FROM RowList_Cursor INTO @DimensionID, @DimensionName, @DimensionTypeID, @StorageTypeBM, @HierarchyName, @PropertyName, @EqualityString, @Filter
+
+					WHILE @@FETCH_STATUS = 0
+						BEGIN
+							IF @DebugBM & 2 > 0 SELECT [@DimensionID]=@DimensionID, [@DimensionName]=@DimensionName, [@DimensionTypeID]=@DimensionTypeID, [@StorageTypeBM]=@StorageTypeBM, [@HierarchyName]=@HierarchyName, [@PropertyName]=@PropertyName, [@EqualityString]=@EqualityString, [@Filter]=@Filter
+
+							TRUNCATE TABLE #FilterList
+
+							INSERT INTO #FilterList
+								(
+								[Filter]
+								)
+							SELECT
+								[Filter] = [Value]
+							FROM
+								STRING_SPLIT(@Filter, ',')
+
+							IF @DebugBM & 2 > 0 SELECT [TempTable] = '#FilterList', * FROM #FilterList ORDER BY [SortOrder]
+
+							INSERT INTO #FilterTable
+								(
+								[StepReference],
+								[TupleNo],
+								[DimensionID],
+								[DimensionName],
+								[DimensionTypeID],
+								[StorageTypeBM],
+								[SortOrder],
+								[HierarchyName],
+								[PropertyName],
+								[EqualityString],
+								[Filter]
+								)
+							SELECT
+								[StepReference] = 'RowList',
+								[TupleNo] = 1,
+								[DimensionID] = @DimensionID,
+								[DimensionName] = @DimensionName,
+								[DimensionTypeID] = @DimensionTypeID,
+								[StorageTypeBM] = @StorageTypeBM,
+								[SortOrder] = FL.[SortOrder],
+								[HierarchyName] = @HierarchyName,
+								[PropertyName] = @PropertyName,
+								[EqualityString] = @EqualityString,
+								[Filter] = FL.[Filter]
+							FROM
+								#FilterList FL
+							
+							FETCH NEXT FROM RowList_Cursor INTO @DimensionID, @DimensionName, @DimensionTypeID, @StorageTypeBM, @HierarchyName, @PropertyName, @EqualityString, @Filter
+						END
+
+				CLOSE RowList_Cursor
+				DEALLOCATE RowList_Cursor
+
+				IF CURSOR_STATUS('global','RowListFilter_Cursor') >= -1 DEALLOCATE RowListFilter_Cursor
+				DECLARE RowListFilter_Cursor CURSOR FOR
+					SELECT 
+						[DimensionID],
+						[DimensionTypeID],
+						[StorageTypeBM],
+						[HierarchyName],
+						[PropertyName],
+						[EqualityString],
+						[Filter]
+					FROM
+						#FilterTable FT
+					WHERE
+						FT.[StepReference] = 'RowList' AND
+						FT.[TupleNo] = 1
+					ORDER BY
+						FT.[SortOrder]
+
+					OPEN RowListFilter_Cursor
+					FETCH NEXT FROM RowListFilter_Cursor INTO @DimensionID, @DimensionTypeID, @StorageTypeBM, @HierarchyName, @PropertyName, @EqualityString, @Filter
+
+					WHILE @@FETCH_STATUS = 0
+						BEGIN
+							IF @DebugBM & 2 > 0 SELECT [@DimensionID] = @DimensionID, [@DimensionTypeID] = @DimensionTypeID, [@HierarchyName] = @HierarchyName, [@PropertyName] = @PropertyName, [@StorageTypeBM] = @StorageTypeBM, [@Filter] = @Filter
+							IF @HierarchyName IS NOT NULL AND CASE WHEN LEN(@Filter) = 0 THEN NULL ELSE @Filter END IS NOT NULL
+								BEGIN
+									EXEC pcINTEGRATOR..spGet_LeafLevelFilter @UserID = @UserID, @InstanceID = @InstanceID, @VersionID = @VersionID, @DatabaseName = @CallistoDatabase, @DimensionID = @DimensionID, @HierarchyName = @HierarchyName, @Filter = @Filter, @StorageTypeBM_DataClass = 4, @StorageTypeBM = @StorageTypeBM, @FilterLevel = 'L', @FilterType = 'MemberKey', @LeafLevelFilter = @LeafLevelFilter OUT, @Debug = @DebugSub
+
+									UPDATE #FilterTable
+									SET
+										[LeafLevelFilter] = @LeafLevelFilter
+									WHERE
+										[StepReference] = 'RowList' AND
+										[TupleNo] = 1 AND
+										[DimensionID] = @DimensionID AND
+										[HierarchyName] = @HierarchyName AND
+										[EqualityString] LIKE '%IN%' AND
+										[Filter] = @Filter
+								END
+							FETCH NEXT FROM RowListFilter_Cursor INTO @DimensionID, @DimensionTypeID, @StorageTypeBM, @HierarchyName, @PropertyName, @EqualityString, @Filter
+						END
+
+				CLOSE RowListFilter_Cursor
+				DEALLOCATE RowListFilter_Cursor							
+
+				IF @DebugBM & 2 > 0 SELECT TempTable = '#FilterTable', * FROM #FilterTable WHERE [StepReference] = 'RowList' ORDER BY [TupleNo], [SortOrder]
+			END
+
+	SET @Step = 'Create temp table #GroupBy'
+
+		--DELETE FT
+		--FROM
+		--	#FilterTable FT
+		--WHERE
+		--	DimensionTypeID = 27 AND
+		--	TupleNo = 0 AND
+		--	EqualityString IS NULL AND
+		--	LeafLevelFilter IS NULL
+
+		--SELECT @TimeType = CASE WHEN (SELECT COUNT(1) FROM #FilterTable 
+		--WHERE DimensionID IN (-49)
+		----AND LEN(LeafLevelFilter) > 0
+		--) > 0 THEN 'TimeDay' ELSE 'Time' END
+
+		--IF @DebugBM & 2 > 0 SELECT [@TimeType] = @TimeType
+
+		CREATE TABLE #GroupBy
+			(
+			[SortOrder] int IDENTITY(1,1),
+			[TupleNo] int DEFAULT 0,
+			[DimensionName] nvarchar(100) COLLATE DATABASE_DEFAULT,
+			[PropertyName] nvarchar(100) COLLATE DATABASE_DEFAULT,
+			[LoopNo] int
+			)
+
+		INSERT INTO #GroupBy
+			(
+			[DimensionName]
+			)
+		SELECT DISTINCT
+			[DimensionName] = [Value]
+		FROM
+			STRING_SPLIT(@GroupBy, '|')
+		
+		INSERT INTO #GroupBy
+			(
+			[TupleNo],
+			[DimensionName]
+			)
+		SELECT DISTINCT
+			[TupleNo] = 1,
+			[DimensionName] = FT.[DimensionName]
+		FROM
+			[#FilterTable] FT
+		WHERE
+			[TupleNo] <> 0 AND
+			LEN(FT.[DimensionName]) > 0 AND
+			NOT EXISTS (SELECT 1 FROM #GroupBy GB WHERE GB.[DimensionName] = FT.[DimensionName])
+
+		UPDATE GB
+		SET
+			[DimensionName] = CASE WHEN CHARINDEX('.', GB.[DimensionName]) = 0 THEN GB.[DimensionName] ELSE LEFT(GB.[DimensionName], CHARINDEX('.', GB.[DimensionName]) - 1) END,
+			[PropertyName] = CASE WHEN CHARINDEX('.', GB.[DimensionName]) = 0 THEN 'Label' ELSE SUBSTRING(GB.[DimensionName], CHARINDEX('.', GB.[DimensionName]) + 1, LEN(GB.[DimensionName]) - CHARINDEX('.', GB.[DimensionName])) END
+		FROM
+			#GroupBy GB
+
+		DELETE #GroupBy
+		WHERE [DimensionName] IN ('TimeView')
+
+		INSERT INTO #GroupBy
+			(
+			[TupleNo],
+			[DimensionName],
+			[PropertyName]
+			)
+		SELECT
+			[TupleNo] = -1, --=1
+			[DimensionName] = @TimeType, --'Time',
+			[PropertyName] = 'Label'
+		WHERE
+			NOT EXISTS (SELECT 1 FROM #GroupBy GB WHERE GB.[DimensionName] LIKE 'Time%')
+
+		IF @DebugBM & 2 > 0 SELECT [TempTable] = '#GroupBy', * FROM #GroupBy ORDER BY [SortOrder], [DimensionName]
+
+	SET @Step = 'Create temp table #Time'
+		CREATE TABLE #Time
+			(
+			[MemberId] [bigint] NULL,
+			[Label] [nvarchar](255) NOT NULL,
+			[Description] [nvarchar](512) NOT NULL,
+			[HelpText] [nvarchar](1024) NULL,
+			[Level] [nvarchar](50) NULL,
+			[NumberOfDays] [int] NULL,
+			[PeriodEndDate] [nvarchar](10) NULL,
+			[PeriodStartDate] [nvarchar](10) NULL,
+			[RNodeType] [nvarchar](2) NULL,
+			[RowOrder] [int] NULL,
+			[SBZ] [bit] NULL,
+			[SendTo_MemberId] [bigint] NULL,
+			[SendTo] [nvarchar](255) NULL,
+			[TimeFiscalPeriod_MemberId] [bigint] NULL,
+			[TimeFiscalPeriod] [nvarchar](255) NULL,
+			[TimeFiscalQuarter_MemberId] [bigint] NULL,
+			[TimeFiscalQuarter] [nvarchar](255) NULL,
+			[TimeFiscalSemester_MemberId] [bigint] NULL,
+			[TimeFiscalSemester] [nvarchar](255) NULL,
+			[TimeFiscalTertial_MemberId] [bigint] NULL,
+			[TimeFiscalTertial] [nvarchar](255) NULL,
+			[TimeFiscalYear_MemberId] [bigint] NULL,
+			[TimeFiscalYear] [nvarchar](255) NULL,
+			[TimeMonth_MemberId] [bigint] NULL,
+			[TimeMonth] [nvarchar](255) NULL,
+			[TimeQuarter_MemberId] [bigint] NULL,
+			[TimeQuarter] [nvarchar](255) NULL,
+			[TimeSemester_MemberId] [bigint] NULL,
+			[TimeSemester] [nvarchar](255) NULL,
+			[TimeTertial_MemberId] [bigint] NULL,
+			[TimeTertial] [nvarchar](255) NULL,
+			[TimeYear_MemberId] [bigint] NULL,
+			[TimeYear] [nvarchar](255) NULL,
+			[PresentationYN] bit DEFAULT 0
+			)
+
+	SET @Step = 'Create temp table #TimeViewFilter'
+		CREATE TABLE #TimeViewFilter
+			(
+			Member nvarchar(100)
+			)
+
+	SET @Step = '@ResultTypeBM & 1'
+		IF @ResultTypeBM & 1 > 0
+			BEGIN
+				EXEC [dbo].[spGet_DataClass_DimensionList]
+					@UserID=@UserID,
+					@InstanceID=@InstanceID,
+					@VersionID=@VersionID,
+					@DataClassID=@DataClassID,
+					@OrganizationPositionID=@ActingAs,
+					@AssignmentID=@AssignmentID,
+					@DimensionList=@DimensionList,
+					@ResultTypeBM=3,
+					@JobID=@JobID,
+					@Debug=@DebugSub
+			END
+
+	SET @Step = '@ResultTypeBM & 2'
+		IF @ResultTypeBM & 2 > 0
+			BEGIN
+				EXEC [spGet_DataClass_DimensionMember]
+					@UserID=@UserID,
+					@InstanceID=@InstanceID,
+					@VersionID=@VersionID,
+					@DataClassID=@DataClassID,
+					@PropertyList=@PropertyList,
+					@AssignmentID=@AssignmentID,
+					@DimensionList=@DimensionList,
+					@OnlySecuredDimYN=@OnlySecuredDimYN,
+					@ShowAllMembersYN=@ShowAllMembersYN,
+					@OnlyDataClassDimMembersYN=@OnlyDataClassDimMembersYN,
+					@Parent_MemberKey=@Parent_MemberKey,
+					@Selected=@Selected OUT,
+					@JobID=@JobID,
+					@Debug=@DebugSub
+
+				--EXEC [spGet_DataClass_DimensionMember]
+				--	@UserID = @UserID,
+				--	@InstanceID = 0,
+				--	@VersionID = 0,
+				--	@DimensionList = '-77',
+				--	@ShowAllMembersYN = 1
+			END
+		
+		IF @DebugBM & 16 > 0 SELECT Step = 40, StartTime = @StartTime, CurrentTime = SYSUTCDATETIME(), [Time] = DATEDIFF(MILLISECOND, @StartTime, SYSUTCDATETIME())
+
+	SET @Step = 'Update #FilterTable'
+		UPDATE FT
+		SET
+			[MultiDimIncludedYN] = 1
+		FROM
+			#FilterTable FT
+		WHERE
+			DimensionTypeID = 27 AND
+			LEN([LeafLevelFilter]) > 0
+
+		UPDATE FT
+		SET
+			[MultiDimIncludedYN] = 1
+		FROM
+			#FilterTable FT
+			INNER JOIN #GroupBy GB ON GB.[DimensionName] = FT.[DimensionName]
+		WHERE
+			FT.[DimensionTypeID] = 27 AND
+			NOT EXISTS (SELECT 1 FROM #FilterTable FTD WHERE FTD.DimensionID = FT.DimensionID AND FTD.[MultiDimIncludedYN] <> 0)
+
+		IF @DebugBM & 2 > 0 SELECT TempTable = '#FilterTable_2', * FROM #FilterTable WHERE [StepReference] IN (@StepReference, 'RowList') ORDER BY [TupleNo], [SortOrder], [DimensionName]
+
+	SET @Step = 'Time handling'
+		SET @TimeFilter = ''
+		SELECT
+			@TimeFilter = @TimeFilter + [LeafLevelFilter] + ','
+		FROM
+			(
+			SELECT DISTINCT
+				[LeafLevelFilter]
+			FROM
+				#FilterTable
+			WHERE
+				[DimensionID] IN (-49, -7) AND
+				LEN([LeafLevelFilter]) > 0
+			) sub
+
+		IF @DebugBM & 2 > 0 SELECT [LEN(@TimeFilter)] =  LEN(@TimeFilter)
+		
+		IF LEN(@TimeFilter) > 0 
+			BEGIN
+				SET @TimeFilter = LEFT(@TimeFilter, LEN(@TimeFilter) - 1)
+				SET @TimeFilterString = '[MemberId] IN (' + @TimeFilter + ') OR'
+			END
+
+		IF CURSOR_STATUS('global','TimeView_Cursor') >= -1 DEALLOCATE TimeView_Cursor
+		DECLARE TimeView_Cursor CURSOR FOR
+			
+			SELECT
+				[TupleNo],
+				[Filter]
+			FROM
+				#FilterTable
+			WHERE
+				TupleNo <> 0 AND
+				DimensionID = -77
+			ORDER BY
+				[TupleNo]
+
+			OPEN TimeView_Cursor
+			FETCH NEXT FROM TimeView_Cursor INTO @TupleNo, @Filter
+
+			WHILE @@FETCH_STATUS = 0
+				BEGIN
+					IF @DebugBM & 2 > 0 SELECT [@TupleNo] = @TupleNo, [@Filter] = @Filter
+
+					SET @TimeFilterTupleString = ''
+
+					SELECT
+						@TimeFilterTuple = [LeafLevelFilter]
+					FROM
+						#FilterTable
+					WHERE
+						TupleNo = @TupleNo AND
+						DimensionID = -7
+
+					SET @TimeFilterTuple = ISNULL(CASE WHEN @TimeFilterTuple = '' THEN NULL ELSE @TimeFilterTuple END, @TimeFilter)
+
+					IF @DebugBM & 2 > 0 SELECT [@TimeFilterTuple] = @TimeFilterTuple
+
+					IF @Filter IN ('YTD', 'FYTD')
+						BEGIN
+							SET @TimeProperty = CASE @Filter WHEN 'YTD' THEN 'TimeYear_MemberId' WHEN 'FYTD' THEN 'TimeFiscalYear_MemberId' END
+							
+							TRUNCATE TABLE #TimeViewFilter
+
+							SET @SQLStatement = '
+								INSERT INTO #TimeViewFilter
+									(
+									[Member]
+									)
+								SELECT DISTINCT
+									[Member] = [' + @TimeProperty + ']
+								FROM
+									' + @CallistoDatabase + '..S_DS_Time
+								WHERE
+									MemberID IN (' + @TimeFilterTuple + ')'
+
+							IF @DebugBM & 2 > 0 PRINT @SQLStatement
+							EXEC (@SQLStatement)
+
+							SELECT
+								@TimeFilterTupleString = @TimeFilterTupleString + [Member] + ','
+							FROM
+								#TimeViewFilter
+							ORDER BY
+								[Member]
+
+							IF LEN(@TimeFilterTupleString) > 1
+								BEGIN
+									SET @TimeFilterTupleString = LEFT(@TimeFilterTupleString, LEN(@TimeFilterTupleString) - 1)
+									SET @TimeFilterString = @TimeFilterString + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + '[' + @TimeProperty + '] IN (' + @TimeFilterTupleString + ') OR'
+								END
+						END
+					ELSE IF @Filter IN ('R12')
+						BEGIN
+							SET @SQLStatement = '
+								SELECT
+									@InternalVariable1 = MIN([RowOrder]),
+									@InternalVariable2 = MIN([MemberId])
+								FROM
+									' + @CallistoDatabase + '..[S_DS_Time]
+								WHERE
+									MemberID IN (' + @TimeFilterTuple + ')'
+
+							EXEC sp_executesql @SQLStatement, N'@InternalVariable1 int OUT, @InternalVariable2 bigint OUT', @InternalVariable1 = @MinRowOrder OUT, @InternalVariable2 = @MinTimeMemberId OUT
+
+							IF @DebugBM & 2 > 0 SELECT [@MinRowOrder] = @MinRowOrder, [@MinTimeMemberId] = @MinTimeMemberId
+
+							TRUNCATE TABLE #TimeViewFilter
+
+							SET @SQLStatement = '
+								INSERT INTO #TimeViewFilter
+									(
+									[Member]
+									)
+								SELECT DISTINCT
+									[Member] = [MemberId]
+								FROM
+									' + @CallistoDatabase + '..S_DS_Time
+								WHERE
+									[RowOrder] BETWEEN ' + CONVERT(nvarchar(15), @MinRowOrder - 11) + ' AND ' + CONVERT(nvarchar(15), @MinRowOrder - 1)
+
+							IF @DebugBM & 2 > 0 PRINT @SQLStatement
+							EXEC (@SQLStatement)
+
+							SELECT
+								@TimeFilterTupleString = @TimeFilterTupleString + [Member] + ','
+							FROM
+								#TimeViewFilter
+							ORDER BY
+								[Member]
+
+							IF LEN(@TimeFilterTupleString) > 1
+								BEGIN
+									SET @TimeFilterTupleString = LEFT(@TimeFilterTupleString, LEN(@TimeFilterTupleString) - 1)
+									SET @TimeFilterString = @TimeFilterString + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + '[MemberId] IN (' + @TimeFilterTupleString + ') OR'
+								END
+						END
+					ELSE 
+						BEGIN
+							SET @Message = 'TimeView = ' + @Filter + ' is not implemented.'
+							SET @Severity = 0
+						END
+
+					FETCH NEXT FROM TimeView_Cursor INTO @TupleNo, @Filter
+				END
+
+		CLOSE TimeView_Cursor
+		DEALLOCATE TimeView_Cursor
+
+		SELECT @TimeFilterString = LEFT(@TimeFilterString, LEN(@TimeFilterString) - 2)
+
+--		SELECT @TimeType = CASE WHEN (SELECT COUNT(1) FROM #FilterTable WHERE DimensionID IN (-49) AND LEN(LeafLevelFilter) > 0) > 0 THEN 'TimeDay' ELSE 'Time' END
+
+		IF @DebugBM & 2 > 0 SELECT [@TimeFilterString] = @TimeFilterString
+
+		SET @SQLStatement = '
+			INSERT INTO #Time
+				(
+				[MemberId],
+				[Label],
+				[Description],
+				[HelpText],
+				[Level],
+				[NumberOfDays],
+				[PeriodEndDate],
+				[PeriodStartDate],
+				[RNodeType],
+				' + CASE WHEN @TimeType = 'Time' THEN '[RowOrder],' ELSE '' END + '
+				[SBZ],
+				[SendTo_MemberId],
+				[SendTo],
+				[TimeFiscalPeriod_MemberId],
+				[TimeFiscalPeriod],
+				[TimeFiscalQuarter_MemberId],
+				[TimeFiscalQuarter],
+				[TimeFiscalSemester_MemberId],
+				[TimeFiscalSemester],
+				[TimeFiscalTertial_MemberId],
+				[TimeFiscalTertial],
+				[TimeFiscalYear_MemberId],
+				[TimeFiscalYear],
+				[TimeMonth_MemberId],
+				[TimeMonth],
+				[TimeQuarter_MemberId],
+				[TimeQuarter],
+				[TimeSemester_MemberId],
+				[TimeSemester],
+				[TimeTertial_MemberId],
+				[TimeTertial],
+				[TimeYear_MemberId],
+				[TimeYear]
+				)
+			SELECT
+				[MemberId],
+				[Label],
+				[Description],
+				[HelpText],
+				[Level],
+				[NumberOfDays],
+				[PeriodEndDate],
+				[PeriodStartDate],
+				[RNodeType],
+				' + CASE WHEN @TimeType = 'Time' THEN '[RowOrder],' ELSE '' END + '
+				[SBZ],
+				[SendTo_MemberId],
+				[SendTo],
+				[TimeFiscalPeriod_MemberId],
+				[TimeFiscalPeriod],
+				[TimeFiscalQuarter_MemberId],
+				[TimeFiscalQuarter],
+				[TimeFiscalSemester_MemberId],
+				[TimeFiscalSemester],
+				[TimeFiscalTertial_MemberId],
+				[TimeFiscalTertial],
+				[TimeFiscalYear_MemberId],
+				[TimeFiscalYear],
+				[TimeMonth_MemberId],
+				[TimeMonth],
+				[TimeQuarter_MemberId],
+				[TimeQuarter],
+				[TimeSemester_MemberId],
+				[TimeSemester],
+				[TimeTertial_MemberId],
+				[TimeTertial],
+				[TimeYear_MemberId],
+				[TimeYear]
+			FROM
+				[' + @CallistoDatabase + '].[dbo].[S_DS_' + @TimeType + ']
+			WHERE
+				[RNodeType] = ''L''' + CASE WHEN LEN(@TimeFilterString) > 0 THEN ' AND
+				(
+				' + @TimeFilterString + '
+				)' ELSE '' END
+
+		IF @DebugBM & 2 > 0 PRINT @SQLStatement
+		EXEC (@SQLStatement)
+
+		IF LEN(@TimeFilter) > 0
+			BEGIN
+				SET @SQLStatement = '
+					UPDATE #Time
+					SET [PresentationYN] = 1
+					WHERE [MemberID] IN (' + @TimeFilter + ')'
+
+				IF @DebugBM & 2 > 0 PRINT @SQLStatement
+				EXEC (@SQLStatement)
+			END
+
+		SELECT @TimeTableYN = CASE WHEN COUNT(1) = 0 THEN 0 ELSE 1 END FROM #Time
+		
+		IF @DebugBM & 2 > 0 SELECT TempTable = '#Time', * FROM #Time
+
+		SELECT @TimeDimensionTypeID = MAX(DimensionID) FROM #FilterTable WHERE TupleNo = 0 AND DimensionTypeID = 7
+
+		IF @DebugBM & 2 > 0  SELECT [@TimeTableYN] = @TimeTableYN, [@TimeDimensionTypeID] = @TimeDimensionTypeID
+
+	SET @Step = 'Get temp table #MultiDim when needed'
+		--IF @ResultTypeBM & 772 > 0 AND (SELECT COUNT(1) FROM #FilterTable WHERE [MultiDimIncludedYN] <> 0) > 0
+		IF @ResultTypeBM & 876 > 0 AND (SELECT COUNT(1) FROM #FilterTable WHERE [MultiDimIncludedYN] <> 0) > 0
+			BEGIN
+				SET @MultiDimYN = 1
+IF @DebugBM & 2 > 0 SELECT 'Arne1'
+				CREATE TABLE #MultiDim
+					(
+					[DimensionID] int,
+					[DimensionName] nvarchar(100) COLLATE DATABASE_DEFAULT,
+					[HierarchyName] nvarchar(100) COLLATE DATABASE_DEFAULT,
+					[Category_MemberKey] nvarchar(50) COLLATE DATABASE_DEFAULT,
+					[Category_Description] nvarchar(100) COLLATE DATABASE_DEFAULT,
+					[Leaf_MemberId] bigint,
+					[Leaf_MemberKey] nvarchar(50) COLLATE DATABASE_DEFAULT,
+					[Leaf_Description] nvarchar(100) COLLATE DATABASE_DEFAULT
+					)
+
+IF @DebugBM & 2 > 0
+	BEGIN
+		SELECT 'Arne2'
+		SELECT DISTINCT
+			DimensionID,
+			DimensionName,
+			HierarchyName,
+			EqualityString = ISNULL(FT.EqualityString, 'IN'),
+			LeafLevelFilter = ISNULL(FT.LeafLevelFilter, '')
+		FROM
+			#FilterTable FT
+		WHERE
+			FT.[StepReference] IN (@StepReference, 'RowList') AND
+			FT.[TupleNo] = 0 AND
+			FT.[MultiDimIncludedYN] <> 0
+--			AND LEN(FT.[LeafLevelFilter]) > 0
+		ORDER BY
+			DimensionID
+	END
+
+				IF CURSOR_STATUS('global','MultiDim_Cursor') >= -1 DEALLOCATE MultiDim_Cursor
+				DECLARE MultiDim_Cursor CURSOR FOR
+			
+					SELECT DISTINCT
+						DimensionID,
+						DimensionName,
+						HierarchyName,
+						EqualityString = ISNULL(FT.EqualityString, 'IN'),
+						LeafLevelFilter = ISNULL(FT.LeafLevelFilter, '')
+					FROM
+						#FilterTable FT
+					WHERE
+						FT.[StepReference] IN (@StepReference, 'RowList') AND
+						FT.[TupleNo] = 0 AND
+						FT.[MultiDimIncludedYN] <> 0
+					ORDER BY
+						DimensionID
+
+					OPEN MultiDim_Cursor
+					FETCH NEXT FROM MultiDim_Cursor INTO @DimensionID, @DimensionName, @HierarchyName, @EqualityString, @LeafLevelFilter
+
+					WHILE @@FETCH_STATUS = 0
+						BEGIN
+							IF @DebugBM & 2 > 0 SELECT [@DimensionID] = @DimensionID, [@DimensionName] = @DimensionName, [@HierarchyName] = @HierarchyName, [@EqualityString] = @EqualityString, [@LeafLevelFilter] = @LeafLevelFilter
+IF @DebugBM & 2 > 0 SELECT 'Arne3'
+							SET @LoopNo = @LoopNo + 1
+							UPDATE GB
+							SET
+								[LoopNo] = @LoopNo
+							FROM
+								#GroupBy GB
+							WHERE
+								GB.DimensionName = @DimensionName
+
+							IF @ResultTypeBM & 768 > 0 SET @CategoryYN = 1
+
+IF @DebugBM & 2 > 0 SELECT 'Arne4', [@DebugSub] = @DebugSub
+
+							EXEC [dbo].[spGet_MultiDimFilter]
+								@UserID = @UserID,
+								@InstanceID = @InstanceID,
+								@VersionID = @VersionID,
+								@MultiDimensionID = @DimensionID,
+								@MultiDimensionName = @DimensionName,
+								@MultiHierarchyName = @HierarchyName,
+								@LeafLevelFilter = @LeafLevelFilter,
+								@EqualityString = @EqualityString,
+								@CategoryYN = @CategoryYN,
+								@JournalYN = 0,
+								@CallistoDatabase = @CallistoDatabase,
+								@SQL_MultiDimJoin = @SQL_MultiDimJoin OUT,
+								@JobID = @JobID,
+								@Debug = @DebugSub
+
+							IF @DebugBM & 2 > 0 SELECT [@SQL_MultiDimJoin] = @SQL_MultiDimJoin
+
+IF @DebugBM & 2 > 0 SELECT 'Arne5'
+
+							FETCH NEXT FROM MultiDim_Cursor INTO @DimensionID, @DimensionName, @HierarchyName, @EqualityString, @LeafLevelFilter
+						END
+
+				CLOSE MultiDim_Cursor
+				DEALLOCATE MultiDim_Cursor
+
+			IF @DebugBM & 2 > 0 SELECT TempTable = '#MultiDim', * FROM #MultiDim
+		END
+
+	SET @Step = 'Get ReadAccess'
+		--IF @ResultTypeBM & 772 > 0
+		IF @ResultTypeBM & 876 > 0
+			BEGIN
+				CREATE TABLE #ReadAccess
+					(
+					[DimensionID] int,
+					[DimensionName] nvarchar(100) COLLATE DATABASE_DEFAULT,
+					[StorageTypeBM] int,
+					[Filter] nvarchar(4000) COLLATE DATABASE_DEFAULT,
+					[LeafLevelFilter] nvarchar(max) COLLATE DATABASE_DEFAULT,
+					[DataColumn] nvarchar(100) COLLATE DATABASE_DEFAULT,
+					[SelectYN] bit
+					)
+
+				EXEC [spGet_ReadAccess] @UserID = @UserID, @InstanceID = @InstanceID, @VersionID = @VersionID, 	@ActingAs = @ActingAs, @StorageTypeBM_DataClass = 4, @JobID = @JobID, @Debug = @DebugSub
+
+				IF @DebugBM & 2 > 0 SELECT TempTable = '#ReadAccess', * FROM #ReadAccess
+			END
+
+	SET @Step = 'Get WHERE clause'
+		--IF @ResultTypeBM & 772 > 0
+		IF @ResultTypeBM & 876 > 0
+			BEGIN
+				CREATE TABLE #WhereTotal
+					(
+					[DimensionID] int,
+					[DimensionName] nvarchar(100) COLLATE DATABASE_DEFAULT,
+					[EqualityString] nvarchar(10) COLLATE DATABASE_DEFAULT,
+					[LeafLevelFilter] nvarchar(max) COLLATE DATABASE_DEFAULT,
+					[SortOrder] int
+					)
+
+				INSERT INTO #WhereTotal
+					(
+					[DimensionID],
+					[DimensionName],
+					[EqualityString],
+					[LeafLevelFilter],
+					[SortOrder]
+					)
+				SELECT
+					[DimensionID],
+					[DimensionName],
+					[EqualityString],
+					[LeafLevelFilter],
+					[SortOrder]
+				FROM
+					#FilterTable FT
+				WHERE
+					FT.[StepReference] = @StepReference AND
+					FT.[TupleNo] = 0 AND
+					LEN(FT.[LeafLevelFilter]) > 0 AND
+					(FT.[DimensionTypeID] NOT IN (7) OR @ResultTypeBM & 32 > 0) AND
+					FT.[DimensionTypeID] NOT IN (8, 27, 50)
+				ORDER BY
+					FT.[SortOrder]
+
+				INSERT INTO #WhereTotal
+					(
+					[DimensionID],
+					[DimensionName],
+					[EqualityString],
+					[LeafLevelFilter],
+					[SortOrder]
+					)
+				SELECT
+					[DimensionID],
+					[DimensionName],
+					[EqualityString] = 'IN',
+					[LeafLevelFilter],
+					[SortOrder] = 10000
+				FROM
+					#ReadAccess RA
+				WHERE
+					LEN(RA.[LeafLevelFilter]) > 0
+
+				SET @SQL_Where_Total = ''
+							
+				SELECT 
+					@SQL_Where_Total = @SQL_Where_Total + 'DC.[' + WT.[DimensionName] + '_MemberID] ' + WT.[EqualityString] + ' (' + WT.[LeafLevelFilter] + CASE WHEN DimensionID = -2 AND @ResultTypeBM & 32 > 0 THEN ',' + CONVERT(nvarchar(15), @LineItemBP) ELSE '' END + ') AND '
+				FROM
+					#WhereTotal WT
+				ORDER BY
+					WT.[SortOrder],
+					WT.[DimensionName]
+			END
+
+	SET @Step = 'Get Tuple clause'
+		IF @ResultTypeBM & 772 > 0
+			BEGIN
+				IF CURSOR_STATUS('global','Tuple_Cursor') >= -1 DEALLOCATE Tuple_Cursor
+				DECLARE Tuple_Cursor CURSOR FOR
+
+					SELECT DISTINCT
+						[TupleNo] = FT.[TupleNo],
+						[TupleName] = 'T_' + ISNULL(MAX(FT.[ObjectReference]), 'Tuple_' + CONVERT(nvarchar(15), FT.[TupleNo]))
+					FROM
+						#FilterTable FT
+					WHERE
+						FT.[StepReference] = @StepReference AND
+						FT.[TupleNo] > 0 AND
+						(LEN(FT.[LeafLevelFilter]) > 0 OR LEN(FT.[ObjectReference]) > 0) AND
+						ISNULL(FT.[DimensionTypeID], 0) NOT IN (27, 50)
+					GROUP BY
+						FT.[TupleNo]
+					ORDER BY
+						FT.[TupleNo]
+
+					OPEN Tuple_Cursor
+					FETCH NEXT FROM Tuple_Cursor INTO @TupleNo, @TupleName
+
+					WHILE @@FETCH_STATUS = 0
+						BEGIN
+							IF @DebugBM & 32 > 0 SELECT [@TupleNo] = @TupleNo, [@TupleName] = @TupleName, [@SQL_Tuple] = @SQL_Tuple
+
+							SET @SQL_Tuple = @SQL_Tuple + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + '[' + @TupleName +'] = ROUND(SUM(CASE WHEN '
+							
+							IF @DebugBM & 32 > 0
+								SELECT 
+									[Step] = 'TupleLoop', *
+								FROM
+									#FilterTable FT
+								WHERE
+									FT.[StepReference] = @StepReference AND
+									FT.[TupleNo] = @TupleNo AND
+									LEN(FT.[LeafLevelFilter]) > 0 --AND
+									--FT.[DimensionTypeID] <> 50
+								ORDER BY
+									FT.[SortOrder]
+
+							--IF	(
+							--	SELECT COUNT(1) 
+							--	FROM #FilterTable FT
+							--	WHERE
+							--		FT.[StepReference] = @StepReference AND
+							--		FT.[TupleNo] = @TupleNo AND
+							--		FT.[DimensionTypeID] = 50 AND
+							--		FT.[Filter] IN ('YTD', 'FYTD', 'R12')
+							--	) > 0
+
+								SET @TimeView = NULL
+
+								SELECT 
+									@TimeView = [Filter]
+								FROM
+									#FilterTable FT
+								WHERE
+									FT.[StepReference] = @StepReference AND
+									FT.[TupleNo] = @TupleNo AND
+									FT.[DimensionTypeID] = 50 AND
+									FT.[Filter] IN ('YTD', 'FYTD', 'R12')
+
+								IF @TimeView IS NOT NULL
+								BEGIN
+									UPDATE FT
+									SET
+										[Method] = @TimeView
+									FROM
+										#FilterTable FT
+									WHERE
+										FT.[StepReference] = @StepReference AND
+										FT.[TupleNo] = @TupleNo AND
+										FT.[DimensionTypeID] = 7
+								END
+							
+							SELECT 
+								@SQL_Tuple = @SQL_Tuple + CASE WHEN [Method] IS NOT NULL THEN '[Time].[MemberId] ' ELSE 'DC.[' + FT.[DimensionName] + '_MemberID] ' END + FT.[EqualityString] + ' (' + FT.[LeafLevelFilter] + ') AND '
+							FROM
+								#FilterTable FT
+							WHERE
+								FT.[StepReference] = @StepReference AND
+								FT.[TupleNo] = @TupleNo AND
+								LEN(FT.[LeafLevelFilter]) > 0 AND
+								FT.[DimensionTypeID] <> 50
+							ORDER BY
+								FT.[SortOrder]
+
+							SELECT 
+								@SQL_Tuple = @SQL_Tuple + CASE sub.[Filter] 
+									WHEN 'Periodic' THEN '[TimeView].[MemberId] = [Time].[MemberId] AND '
+									WHEN 'YTD' THEN '[TimeView].[TimeYear_MemberID] = [Time].[TimeYear_MemberID] AND [TimeView].[MemberId] <= [Time].[MemberId] AND '
+									WHEN 'FYTD' THEN '[TimeView].[TimeFiscalYear_MemberID] = [Time].[TimeFiscalYear_MemberID] AND [TimeView].[MemberId] <= [Time].[MemberId] AND '
+									WHEN 'R12' THEN '[TimeView].[RowOrder] BETWEEN [Time].[RowOrder] - 11 AND [Time].[RowOrder] AND'
+									ELSE '[TimeView].[MemberId] = [Time].[MemberId] AND ' END
+							FROM
+								(
+								SELECT
+									[Filter],
+									[SortOrder]
+								FROM
+									#FilterTable FT
+								WHERE
+									FT.[StepReference] = @StepReference AND
+									FT.[TupleNo] = @TupleNo AND
+									FT.[DimensionTypeID] = 50
+								UNION SELECT DISTINCT
+									[Filter] = 'Periodic',
+									[SortOrder] = 0
+								FROM
+									#FilterTable FT
+								WHERE
+									FT.[StepReference] = @StepReference AND
+									FT.[TupleNo] = @TupleNo AND
+									NOT EXISTS (SELECT 1 FROM #FilterTable CFT WHERE CFT.[StepReference] = @StepReference AND CFT.[TupleNo] = @TupleNo AND CFT.[DimensionTypeID] = 50)
+								) sub
+							ORDER BY
+								sub.[SortOrder]
+
+							SET @SQL_Tuple = LEFT(@SQL_Tuple, LEN(@SQL_Tuple) -4) + ' THEN ' + @Measure + '_Value ELSE 0 END), 4),'
+
+							FETCH NEXT FROM Tuple_Cursor INTO @TupleNo, @TupleName
+						END
+
+				CLOSE Tuple_Cursor
+				DEALLOCATE Tuple_Cursor
+			END
+
+	SET @Step = 'Get string for Supress zero'
+		IF @ResultTypeBM & 772 > 0 AND @RowList_SupressZeroYN <> 0
+			BEGIN
+				SELECT
+					@SupressZeroString = @SupressZeroString + '[' + sub.[TupleName] + ']<>0 OR '
+				FROM
+					(
+					SELECT DISTINCT
+						[TupleNo] = FT.[TupleNo],
+						[TupleName] = 'T_' + ISNULL(MAX(FT.[ObjectReference]), 'Tuple_' + CONVERT(nvarchar(15), FT.[TupleNo]))
+					FROM
+						#FilterTable FT
+					WHERE
+						FT.[StepReference] = @StepReference AND
+						FT.[TupleNo] > 0
+					GROUP BY
+						FT.[TupleNo]
+					) sub
+				ORDER BY
+					sub.[TupleNo]
+
+				IF @DebugBM & 2 > 0 SELECT [@SupressZeroString] = @SupressZeroString
+
+				IF LEN(@SupressZeroString) > 0
+					SET @SupressZeroString = ' AND' + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + '(' + LEFT(@SupressZeroString, LEN(@SupressZeroString) - 3) + ')'
+				ELSE
+					SET @SupressZeroString = ''
+			END
+
+	SET @Step = 'Get parts for SQL-statement'
+		IF @ResultTypeBM & 876 > 0 --4, 8, 32, 64, 256, 512
+			BEGIN
+				IF @DebugBM & 2 > 0
+					SELECT
+						LoopQuery = 'SQL_SelectQuery_GrouBy',
+						GB.*, FT.*
+					FROM
+						(
+						SELECT
+							[SortOrder] = MIN ([SortOrder]),
+							[DimensionName],
+							[TupleNo] = 0,
+							[LoopNo] = MAX([LoopNo])
+						FROM
+							#GroupBy
+						GROUP BY
+							[DimensionName]
+						) GB
+						LEFT JOIN #FilterTable FT ON FT.[StepReference] = @StepReference AND (FT.[TupleNo] = GB.[TupleNo] OR GB.[TupleNo] = -1) AND FT.[DimensionName] = GB.[DimensionName]
+					ORDER BY
+						GB.[SortOrder]
+
+				SELECT
+					@SQL_Select1 = @SQL_Select1 + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CASE WHEN FT.[DimensionTypeID] = 27 THEN '[' + GB.[DimensionName] + '_MemberKey] = MAX(MD' + CONVERT(nvarchar(15), GB.[LoopNo]) + '.[Leaf_MemberKey]),' + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + '[' + GB.[DimensionName] + '_MemberId] = MD' + CONVERT(nvarchar(15), GB.[LoopNo]) + '.[Leaf_MemberId],' ELSE '[' + GB.[DimensionName] + '_MemberId] = DC.[' + GB.[DimensionName] + '_MemberId],' END,
+					@SQL_GroupBy1 = @SQL_GroupBy1 + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CASE WHEN FT.[DimensionTypeID] = 27 THEN 'MD' + CONVERT(nvarchar(15), GB.[LoopNo]) + '.[Leaf_MemberID],' ELSE 'DC.[' + GB.[DimensionName] + '_MemberId],' END
+				FROM
+					(
+					SELECT
+						[SortOrder] = MIN ([SortOrder]),
+						[DimensionName],
+						[TupleNo] = 0,
+						[LoopNo] = MAX([LoopNo])
+					FROM
+						#GroupBy
+					GROUP BY
+						[DimensionName]
+					) GB
+					LEFT JOIN #FilterTable FT ON FT.[StepReference] = @StepReference AND (FT.[TupleNo] = GB.[TupleNo] OR GB.[TupleNo] = -1) AND FT.[DimensionName] = GB.[DimensionName]
+				ORDER BY
+					GB.[SortOrder]
+
+				SELECT
+					@SQL_Select2 = @SQL_Select2 + CASE WHEN GB.[TupleNo] = 0 THEN CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CASE WHEN FT.[DimensionTypeID] = 27 THEN '[' + GB.[DimensionName] + '_MemberKey] = DC.[' + GB.[DimensionName] + '_MemberKey],' ELSE '[' + GB.[DimensionName] + '_' + REPLACE(GB.[PropertyName], 'Label', 'MemberKey') + '] = [' + REPLACE(GB.[DimensionName], 'TimeDay', 'Time') + '].[' + GB.[PropertyName] + '],' END ELSE '' END,
+					@SQL_GroupBy2 = @SQL_GroupBy2 + CASE WHEN GB.[TupleNo] = 0 THEN CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CASE WHEN FT.[DimensionTypeID] = 27 THEN 'DC.[' + GB.[DimensionName] + '_MemberKey],' ELSE '[' + REPLACE(GB.[DimensionName], 'TimeDay', 'Time') + '].[' + GB.[PropertyName] + '],' END ELSE '' END
+				FROM
+					#GroupBy GB
+					INNER JOIN #FilterTable FT ON FT.[StepReference] = @StepReference AND FT.[TupleNo] = 0 AND FT.[DimensionName] = GB.[DimensionName] AND FT.[DimensionID] <> ISNULL(@RowList_DimensionID, 0)
+				ORDER BY
+					GB.[SortOrder]
+
+				SELECT
+					@SQL_Join2 = @SQL_Join2 + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CASE WHEN FT.[DimensionTypeID] NOT IN (7, 27, 50) AND GB.[TupleNo] = 0 THEN 'LEFT JOIN [' + @CallistoDatabase + '].[dbo].[S_DS_' + GB.[DimensionName] + '] [' + GB.[DimensionName] + '] ON [' + GB.[DimensionName] + '].MemberId = DC.[' + GB.[DimensionName] + '_MemberId]' ELSE '' END
+				FROM
+					(
+					SELECT
+						[SortOrder] = MIN ([SortOrder]),
+						[DimensionName],
+						[TupleNo] = 0
+					FROM
+						#GroupBy
+					GROUP BY
+						[DimensionName]
+					) GB
+					INNER JOIN #FilterTable FT ON FT.[StepReference] = @StepReference AND FT.[TupleNo] = 0 AND FT.[DimensionName] = GB.[DimensionName] AND FT.[DimensionID] <> ISNULL(@RowList_DimensionID, 0)
+				--WHERE
+				--	GB.[DimensionName] <> @HierarchyDimension OR @ResultTypeBM & 512 = 0
+				ORDER BY
+					GB.[SortOrder]
+
+				IF LEN(@SQL_GroupBy1) > 1 SET @SQL_GroupBy1 = LEFT(@SQL_GroupBy1, LEN(@SQL_GroupBy1) - 1)
+				IF LEN(@SQL_GroupBy2) > 1 SET @SQL_GroupBy2 = LEFT(@SQL_GroupBy2, LEN(@SQL_GroupBy2) - 1)
+				
+				IF @DebugBM & 2 > 0 
+					SELECT
+						[@SQL_Select1] = @SQL_Select1,
+						[@SQL_Select2] = @SQL_Select2,
+						[@SQL_Tuple] = @SQL_Tuple,
+						[@SQL_Join2] = @SQL_Join2,
+						[@SQL_Where_Total] = @SQL_Where_Total,
+						[@SQL_GroupBy1] = @SQL_GroupBy1,
+						[@SQL_GroupBy2] = @SQL_GroupBy2
+		END
+
+	SET @Step = 'Set @TimePresentation'
+		IF @ResultTypeBM & 772 > 0
+			BEGIN
+				SET @TimePresentation = ''
+				IF (SELECT COUNT(1) FROM #GroupBy WHERE TupleNo = 0 AND DimensionName = 'Time' AND PropertyName = 'Label') > 0
+					SET @TimePresentation = 'INNER JOIN #Time T ON T.[Label] = sub.[Time_MemberKey] AND T.[PresentationYN] <> 0'
+				ELSE IF (SELECT COUNT(1) FROM #GroupBy WHERE TupleNo = 0 AND DimensionName = 'Time' AND PropertyName <> 'Label') > 0
+					BEGIN
+						SELECT @TimePropertyName =[PropertyName] FROM #GroupBy WHERE TupleNo = 0 AND DimensionName = 'Time' AND PropertyName <> 'Label'
+						SET @TimePresentation = 'INNER JOIN #Time T ON T.[' + @TimePropertyName + '] = sub.[Time_' + @TimePropertyName + '] AND T.[PresentationYN] <> 0'
+					END
+			END
+
+	SET @Step = '@ResultTypeBM & 12'
+		IF @ResultTypeBM & 12 > 0
+			BEGIN
+				SELECT @WorkflowStateYN = COUNT(1) FROM #FilterTable WHERE TupleNo = 0 AND DimensionID = -63
+				SELECT @AddScenarioYN = CASE WHEN (SELECT COUNT(1) FROM #GroupBy WHERE DimensionName = 'Scenario') = 0 AND (SELECT COUNT(1) FROM #FilterTable WHERE DimensionID = -6) > 0 AND @ResultTypeBM & 8 > 0 THEN 1 ELSE 0 END
+
+				IF @DebugBM & 2 > 0
+					SELECT
+						[@WorkflowStateYN] = @WorkflowStateYN,
+						[@AddScenarioYN] = @AddScenarioYN,
+						[@SQL_Select1] = @SQL_Select1,
+						[@Measure] = @Measure,
+						[@SQL_Where_Total] = @SQL_Where_Total
+				
+				SET @SQLStatement = '
+					SELECT' + @SQL_Select1 + CASE WHEN @AddScenarioYN <> 0 THEN '
+						[Scenario_MemberID] = DC.[Scenario_MemberID],' ELSE '' END + '
+						[' + @Measure + '_Value] = SUM(DC.[' + @Measure + '_Value])' + CASE WHEN @WorkflowStateYN <> 0 THEN ',
+						[WorkflowStateID] = MAX(CONVERT(int, DC.[WorkFlowState_MemberId])),
+						[Workflow_UpdatedBy_UserID] = 0' ELSE '' END + '
+					INTO
+						' + @TmpGlobalTable + '
+					FROM
+						[' + @CallistoDatabase + '].[dbo].[FACT_' + @DataClassName + '_default_partition] DC WITH (INDEX([NCCSI_' + @DataClassName + ']))
+						' + CASE WHEN LEN(@TimeFilterString) > 0 THEN 'INNER JOIN #Time T ON T.[MemberId] = ' + CASE WHEN @TimeDimensionTypeID = -49 THEN 'DC.[TimeDay_MemberId]' ELSE 'DC.[Time_MemberId]' END ELSE '' END + CASE WHEN @MultiDimYN <> 0 THEN @SQL_MultiDimJoin ELSE '' END + '
+					WHERE
+						' + @SQL_Where_Total + '
+						1 = 1
+					' + CASE WHEN LEN(@SQL_GroupBy1) > 0 THEN 'GROUP BY' + @SQL_GroupBy1 + CASE WHEN @AddScenarioYN <> 0 THEN ',
+						DC.[Scenario_MemberID]' ELSE '' END ELSE '' END + '
+					' + CASE WHEN LEN(@SQL_GroupBy1) > 0 AND @RowList_SupressZeroYN <> 0 THEN CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + 'HAVING
+						SUM(DC.' + @Measure + '_Value) <> 0' ELSE '' END
+					/*+ ' 
+					HAVING
+						SUM(DC.' + @Measure + '_Value) <> 0'*/
+
+				IF @DebugBM & 2 > 0 PRINT @SQLStatement
+				EXEC (@SQLStatement)
+
+				IF @DebugBM & 2 > 0
+					BEGIN
+						SET @SQLStatement = 'SELECT TempTable = ''' + @TmpGlobalTable + ''', * FROM ' + @TmpGlobalTable
+						EXEC (@SQLStatement)
+					END
+			END
+
+	SET @Step = '@ResultTypeBM & 4'
+		IF @ResultTypeBM & 4 > 0
+			BEGIN
+				IF @ResultTypeBM & 128 > 0 
+					BEGIN
+						IF @DebugBM & 2 > 0 SELECT 128
+
+					END
+
+				SET @SQLStatement = '			
+					SELECT
+						[ResultTypeBM] = 4,' + @SQL_Select2 + CASE WHEN @WorkflowStateYN <> 0 THEN '
+						[WorkflowStateID] = ' + CASE WHEN LEN(@TimeFilterString) > 0 THEN 'MAX(CASE WHEN [TimeView].[MemberId] = [Time].[MemberId] THEN DC.WorkflowStateID ELSE -1 END)' ELSE 'MAX(DC.[WorkflowStateID])' END + ',
+						[Workflow_UpdatedBy_UserID] = MAX(DC.[Workflow_UpdatedBy_UserID]),' ELSE '' END + @SQL_Tuple + '
+						[' + @Measure + '_Value] = ' + CASE WHEN LEN(@TimeFilterString) > 0 THEN 'ROUND(SUM(CASE WHEN [TimeView].[MemberId] = [Time].[MemberId] THEN DC.[' + @Measure + '_Value] ELSE 0 END), 4)' ELSE 'ROUND(SUM(DC.[' + @Measure + '_Value]), 4)' END + '
+					FROM
+						' + @TmpGlobalTable + ' DC' + CASE WHEN LEN(@TimeFilterString) > 0 OR (SELECT COUNT(1) FROM #GroupBy WHERE DimensionName IN ('Time', 'TimeDay')) > 0 THEN '
+						INNER JOIN #Time [TimeView] ON [TimeView].[MemberID] = DC.[' + @TimeType + '_MemberId]
+						INNER JOIN #Time [Time] ON 1 = 1' ELSE '' END + @SQL_Join2 + '
+					' + CASE WHEN LEN(@SQL_GroupBy2) > 0 THEN 'GROUP BY' + @SQL_GroupBy2 + CASE WHEN @RowList_SupressZeroYN <> 0 THEN CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + 'HAVING
+						' + CASE WHEN LEN(@TimeFilterString) > 0 THEN 'ROUND(SUM(CASE WHEN [TimeView].[MemberId] = [Time].[MemberId] THEN DC.[' + @Measure + '_Value] ELSE 0 END), 4)' ELSE 'ROUND(SUM(DC.[' + @Measure + '_Value]), 4)' END + ' <> 0' ELSE '' END ELSE '' END
+
+				IF @DebugBM & 2 > 0 PRINT @SQLStatement
+				EXEC (@SQLStatement)
+
+				SET @Selected = @@ROWCOUNT
+			END
+
+	SET @Step = '@ResultTypeBM & 8'
+		IF @ResultTypeBM & 8 > 0 --Changeable
+			BEGIN
+				CREATE TABLE #WorkflowState
+					(
+					[WorkflowStateID] int,
+					[Scenario_MemberKey] nvarchar(50),
+					[Scenario_MemberId] bigint,
+					[TimeFrom] int,
+					[TimeTo] int
+					)
+
+				EXEC [spGet_WriteAccess] @UserID = @UserID, @InstanceID = @InstanceID, @VersionID = @VersionID, @AssignmentID = @AssignmentID, @DataClassID = @DataClassID
+
+				SET @SQLStatement = '
+					UPDATE WFS
+					SET
+						[Scenario_MemberId] = S.[MemberId]
+					FROM
+						#WorkflowState WFS
+						INNER JOIN [' + @CallistoDatabase + '].[dbo].[S_DS_Scenario] S ON S.[Label] = WFS.[Scenario_MemberKey]'
+
+				IF @DebugBM & 2 > 0 PRINT @SQLStatement
+				EXEC (@SQLStatement)
+
+				IF @DebugBM & 2 > 0 SELECT TempTable = '#WorkflowState', * FROM #WorkflowState
+
+				IF (SELECT COUNT(1) FROM #FilterTable FT WHERE FT.[StepReference] = @StepReference AND FT.[TupleNo] = 0 AND FT.[DimensionID] = -7) = 1
+					SET @YearMonthColumn = 'DC.[Time_MemberId]'
+				ELSE IF (SELECT COUNT(1) FROM #FilterTable FT WHERE FT.[StepReference] = @StepReference AND FT.[TupleNo] = 0 AND FT.[DimensionID] IN (-40, -11)) = 2
+					SET @YearMonthColumn = 'DC.[TimeYear_MemberId] * 100 + DC.[TimeMonth_MemberId]' 
+				ELSE IF (SELECT COUNT(1) FROM #FilterTable FT WHERE FT.[StepReference] = @StepReference AND FT.[TupleNo] = 0 AND FT.[DimensionID] IN (-49)) = 1
+					SET @YearMonthColumn = 'DC.[TimeDay_MemberId] / 100' 
+
+				CREATE TABLE [dbo].[#DC_Param]
+					(
+					[ParameterType] [nvarchar](50) COLLATE DATABASE_DEFAULT,
+					[ParameterName] [nvarchar](50) COLLATE DATABASE_DEFAULT,
+					[Default_MemberID] [bigint],
+					[Default_MemberKey] [nvarchar](100) COLLATE DATABASE_DEFAULT,
+					[Default_MemberDescription] [nvarchar](255) COLLATE DATABASE_DEFAULT,
+					[Visible] [bit],
+					[Changeable] [bit],
+					[Parameter] [nvarchar](100) COLLATE DATABASE_DEFAULT,
+					[DataType] [nvarchar](50) COLLATE DATABASE_DEFAULT,
+					[FormatString] [nvarchar](50) COLLATE DATABASE_DEFAULT,
+					[Axis] [nvarchar](50),
+					[Index] [int] IDENTITY(1,1)
+					)
+
+				INSERT INTO [#DC_Param]
+					(
+					[ParameterType],
+					[ParameterName],
+					[Default_MemberID],
+					[Default_MemberKey],
+					[Default_MemberDescription],
+					[Visible],
+					[Changeable],
+					[Parameter],
+					[DataType],
+					[FormatString],
+					[Axis]
+					)
+				SELECT
+					ParameterType = 'Measure',
+					ParameterName = @DataClassName,
+					Default_MemberID = NULL,
+					Default_MemberKey = NULL,
+					Default_MemberDescription = M.MeasureDescription,
+					Visible = 1,
+					Changeable = 1,
+					Parameter = @DataClassName,
+					DataType = DT.DataTypePortal,
+					FormatString = M.FormatString,
+					Axis = 'Column'
+				FROM
+					Measure M
+					INNER JOIN DataType DT ON DT.DataTypeID = M.DataTypeID
+				WHERE
+					M.DataClassID = @DataClassID AND
+					M.SelectYN <> 0 AND
+					M.DeletedID IS NULL
+				ORDER BY
+					M.SortOrder
+
+				IF @DebugBM & 2 > 0 SELECT [TempTable] = '#DC_Param', * FROM #DC_Param
+
+				DECLARE MeasureList_8_Cursor CURSOR FOR
+
+					SELECT 
+						MeasureName = '[' + REPLACE([ParameterName], '_Value', '') + '_Value]'
+					FROM
+						#DC_Param
+					WHERE
+						ParameterType = 'Measure'
+					ORDER BY
+						[Index]
+
+					OPEN MeasureList_8_Cursor
+					FETCH NEXT FROM MeasureList_8_Cursor INTO @MeasureName
+
+					WHILE @@FETCH_STATUS = 0
+						BEGIN
+							IF @DebugBM & 2 > 0 SELECT [@MeasureName] = @MeasureName
+
+							SET @SQLMeasureList_8 = @SQLMeasureList_8 + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9)+ CHAR(9) + @MeasureName + ' = CASE WHEN MAX(WS.[WorkflowStateID]) IS NULL AND ' + CONVERT(nvarchar(15), @DataClassTypeID) + ' NOT IN (-6) THEN 0 ELSE 1 END,'
+
+							FETCH NEXT FROM MeasureList_8_Cursor INTO @MeasureName
+						END
+
+				CLOSE MeasureList_8_Cursor
+				DEALLOCATE MeasureList_8_Cursor		
+
+				SET @SQLMeasureList_8 = LEFT(@SQLMeasureList_8, LEN(@SQLMeasureList_8) - 1)
+				
+				IF @DebugBM & 2 > 0 SELECT [@SQLMeasureList_8] = @SQLMeasureList_8
+
+				SET @SQLStatement = '
+					SELECT
+						[ResultTypeBM] = 8,' + @SQL_Select2 + CASE WHEN @WorkflowStateYN <> 0 THEN '
+						[WorkflowStateID] = ' + CASE WHEN LEN(@TimeFilterString) > 0 THEN 'MAX(CASE WHEN [TimeView].[MemberId] = [Time].[MemberId] THEN DC.[WorkflowStateID] ELSE -1 END)' ELSE 'MAX(DC.[WorkflowStateID])' END + ',
+						[Workflow_UpdatedBy_UserID] = MAX(DC.[Workflow_UpdatedBy_UserID]),' ELSE '' END + @SQL_Tuple + @SQLMeasureList_8 + '
+					FROM
+						' + @TmpGlobalTable + ' DC' + CASE WHEN LEN(@TimeFilterString) > 0 OR (SELECT COUNT(1) FROM #GroupBy WHERE DimensionName IN ('Time', 'TimeDay')) > 0 THEN '
+						INNER JOIN #Time [TimeView] ON [TimeView].[MemberID] = DC.[Time_MemberId]
+						INNER JOIN #Time [Time] ON 1 = 1' ELSE '' END + @SQL_Join2 + '
+						' + CASE WHEN @WorkflowStateYN <> 0 THEN 'LEFT JOIN #WorkflowState WS ON WS.[WorkflowStateID] = DC.[WorkFlowStateID] AND [Time].[MemberID] BETWEEN WS.[TimeFrom] AND WS.[TimeTo] AND WS.[Scenario_MemberId] = DC.[Scenario_MemberId]' ELSE 'LEFT JOIN (SELECT [WorkFlowStateID]=1) WS ON 1 = 1' END + '
+					' + CASE WHEN LEN(@SQL_GroupBy2) > 0 THEN 'GROUP BY' + @SQL_GroupBy2 + CASE WHEN @WorkflowStateYN <> 0 THEN ',' + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + '[DC].[WorkflowStateID]' ELSE '' END + CASE WHEN @RowList_SupressZeroYN <> 0 THEN CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + 'HAVING
+						' + CASE WHEN LEN(@TimeFilterString) > 0 THEN 'ROUND(SUM(CASE WHEN [TimeView].[MemberId] = [Time].[MemberId] THEN DC.[' + @Measure + '_Value] ELSE 0 END), 4)' ELSE 'ROUND(SUM(DC.[' + @Measure + '_Value]), 4)' END + ' <> 0' ELSE '' END ELSE '' END
+
+				IF @DebugBM & 2 > 0 PRINT @SQLStatement
+				EXEC (@SQLStatement)
+		END
+
+	SET @Step = '@ResultTypeBM & 32'
+		IF @ResultTypeBM & 32 > 0 --LineItem
+			BEGIN
+				IF @DebugBM & 2 > 0
+					BEGIN
+						SELECT [@ResultTypeBM] = 32, [@SQL_Where_Total] = @SQL_Where_Total
+						PRINT @SQL_Where_Total
+					END
+
+				SET @SQLStatement = '
+					SELECT
+						*
+					INTO
+						' + @TmpGlobalTable_32 + '
+					FROM
+						[' + @CallistoDatabase + '].[dbo].[FACT_' + @DataClassName + '_default_partition] DC WITH (INDEX([NCCSI_' + @DataClassName + ']))
+					WHERE
+						' + @SQL_Where_Total + '
+						1 = 1'
+
+				IF @DebugBM & 2 > 0 PRINT @SQLStatement
+				EXEC (@SQLStatement)
+
+				SET @SQLStatement = '
+					SELECT
+						*
+					INTO
+						' + @TmpGlobalTable_Text + '
+					FROM
+						[' + @CallistoDatabase + '].[dbo].[FACT_' + @DataClassName + '_Text] DC
+					WHERE
+						' + @SQL_Where_Total + '
+						1 = 1'
+
+				IF @DebugBM & 2 > 0 PRINT @SQLStatement
+				EXEC (@SQLStatement)
+
+				IF @DebugBM & 2 > 0
+					BEGIN
+						SET @SQLStatement = '
+							SELECT TempTable = ''' + @TmpGlobalTable_32 + ''', * FROM ' + @TmpGlobalTable_32 + '
+							SELECT TempTable = ''' + @TmpGlobalTable_Text + ''', * FROM ' + @TmpGlobalTable_Text
+
+						PRINT @SQLStatement
+						EXEC (@SQLStatement)
+					END
+
+				SELECT
+					@SQLSelect32 = @SQLSelect32 + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + '[' + FT.[DimensionName] + '] = [' + FT.[DimensionName] + '].[Label],',
+					@SQLSelect32_LIT = @SQLSelect32_LIT + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + '[' + FT.[DimensionName] + '_MemberId] = ' + CASE WHEN FT.[DimensionID] = -63 THEN 'MAX' ELSE '' END + '([sub1].[' + FT.[DimensionName] + '_MemberId]),',
+					@SQLSelect32_S = @SQLSelect32_S + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + '[' + FT.[DimensionName] + '_MemberId] = [S].[' + FT.[DimensionName] + '_MemberId],',
+					@SQLJoin_LIT = @SQLJoin_LIT + CASE WHEN FT.[DimensionID] NOT IN (-2) THEN CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + '[LIT].[' + FT.[DimensionName] + '_MemberId] = [sub1].[' + FT.[DimensionName] + '_MemberId] AND' ELSE '' END,
+					@SQLJoin_T = @SQLJoin_T + CASE WHEN FT.[DimensionID] NOT IN (-2) THEN CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + '[T].[' + FT.[DimensionName] + '_MemberId] = [sub1].[' + FT.[DimensionName] + '_MemberId] AND' ELSE '' END,
+					@SQLGroupBy32_LIT = @SQLGroupBy32_LIT + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CASE WHEN FT.[DimensionID] = -63 THEN '' ELSE '[sub1].[' + FT.[DimensionName] + '_MemberId],' END,
+					@SQLSelect32_DC = @SQLSelect32_DC + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + '[' + FT.[DimensionName] + '_MemberId] = ' + CASE WHEN FT.[DimensionName] = 'LineItem' THEN '-1' ELSE '[DC].[' + FT.[DimensionName] + '_MemberId]' END + ',',
+					@SQLSelect32_Sub = @SQLSelect32_Sub + CASE WHEN FT.[DimensionID] NOT IN (-27, -2) THEN CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + '[' + FT.[DimensionName] + '_MemberId] = [LIT].[' + FT.[DimensionName] + '_MemberId],' ELSE '' END,
+					@SQLJoin32_Sub = @SQLJoin32_Sub + CASE WHEN FT.[DimensionID] NOT IN (-27, -2) THEN CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + '[LIT].[' + FT.[DimensionName] + '_MemberId] = [DC].[' + FT.[DimensionName] + '_MemberId] AND' ELSE '' END,
+					@SQLJoin32_Callisto = @SQLJoin32_Callisto + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + 'INNER JOIN [' + @CallistoDatabase + '].[dbo].[S_DS_' + FT.[DimensionName] + '] [' + FT.[DimensionName] + '] ON [' + FT.[DimensionName] + '].[MemberId] = sub.[' + FT.[DimensionName] + '_MemberId]'
+				FROM
+					#FilterTable FT
+				WHERE
+					FT.[StepReference] = @StepReference AND
+					FT.[TupleNo] = 0 AND
+					FT.[DimensionTypeID] NOT IN (27, 50)
+				ORDER BY
+					FT.[SortOrder]
+				
+				SELECT
+					@SQLSelect32_S = LEFT(@SQLSelect32_S, LEN(@SQLSelect32_S) - 1),
+					@SQLSelect32_Sub = LEFT(@SQLSelect32_Sub, LEN(@SQLSelect32_Sub) - 1),
+					@SQLJoin_LIT = LEFT(@SQLJoin_LIT, LEN(@SQLJoin_LIT) - 4),
+					@SQLJoin_T = LEFT(@SQLJoin_T, LEN(@SQLJoin_T) - 4),
+					@SQLGroupBy32_LIT = LEFT(@SQLGroupBy32_LIT, LEN(@SQLGroupBy32_LIT) - 1),
+					@SQLJoin32_Sub = LEFT(@SQLJoin32_Sub, LEN(@SQLJoin32_Sub) - 4)
+				
+				IF @DebugBM & 2 > 0 SELECT [@SQLSelect32] = @SQLSelect32, [@DataClassName] = @DataClassName
+
+				SET @SQLStatement = '
+	SELECT
+		[ResultTypeBM] = 32,
+		[Comment] = sub.[Comment],' + @SQLSelect32 + '
+		[' + REPLACE(@DataClassName, '_Detail', '') + '_Value] = sub.[' + @DataClassName + '_Value],
+		[UserID] = sub.[UserId],
+		[ChangeDateTime] = sub.[ChangeDateTime]'
+
+				SET @SQLStatement = @SQLStatement + '
+	FROM
+		(	
+		SELECT
+			[Comment] = MAX([T].[' + @DataClassName + '_Text]),' + @SQLSelect32_LIT + '
+			[' + @DataClassName + '_Value] = SUM([LIT].[' + @DataClassName + '_Value]),
+			[UserID] = MAX(ISNULL([LIT].[UserId], [T].[UserId])),
+			[ChangeDateTime] = MAX(ISNULL([LIT].[ChangeDateTime], [T].[ChangeDateTime]))'
+
+				SET @SQLStatement = @SQLStatement + '
+		FROM
+			(
+			SELECT DISTINCT' + @SQLSelect32_S + '
+			FROM
+				' + @TmpGlobalTable_32 + ' [S]
+
+			UNION SELECT DISTINCT' + @SQLSelect32_S + '
+			FROM
+				' + @TmpGlobalTable_Text + ' [S]
+			) [sub1]
+
+			LEFT JOIN ' + @TmpGlobalTable_32 + ' [LIT] ON' + @SQLJoin_LIT + '
+			
+			LEFT JOIN ' + @TmpGlobalTable_Text + ' [T] ON' + @SQLJoin_T + '
+		WHERE
+			' + CASE WHEN @LineItemBP IS NOT NULL THEN '[sub1].BusinessProcess_MemberId = ' + CONVERT(nvarchar(10), @LineItemBP) + ' AND' ELSE '' END + '
+			[sub1].[LineItem_MemberId] <> -1
+		GROUP BY' + @SQLGroupBy32_LIT
+
+				SET @SQLStatement = @SQLStatement + '
+
+		UNION SELECT
+			[Comment] = ''Master Row'',' + @SQLSelect32_DC + '
+			[' + @DataClassName + '_Value] = [DC].[' + @DataClassName + '_Value],
+			[UserID] = [DC].[UserId],
+			[ChangeDateTime] = [DC].[ChangeDateTime]
+		FROM
+			' + @TmpGlobalTable_32 + ' [DC]'
+
+				SET @SQLStatement = @SQLStatement + '
+
+			INNER JOIN (
+				SELECT DISTINCT' + @SQLSelect32_Sub + '
+				FROM
+					' + @TmpGlobalTable_32 + ' [LIT]
+				WHERE
+					' + CASE WHEN @LineItemBP IS NOT NULL THEN 'LIT.BusinessProcess_MemberId = ' + CONVERT(nvarchar(10), @LineItemBP) + ' AND' ELSE '' END + '
+					LIT.[LineItem_MemberId] <> -1
+				) LIT ON' + @SQLJoin32_Sub + CASE WHEN @LineItemBP IS NULL THEN '' ELSE '
+		WHERE
+			DC.LineItem_MemberId = -1' END
+
+				SET @SQLStatement = @SQLStatement + '
+		) sub' + @SQLJoin32_Callisto + '
+	ORDER BY' + CASE WHEN @LineItemBP IS NULL THEN '' ELSE '
+		[sub].[LineItem_MemberId]' END -- + @SQLOrderBy
+
+				IF @DebugBM & 2 > 0 AND LEN(@SQLStatement) > 4000 
+					BEGIN
+						PRINT 'Length of @SQLStatement more than 4000, see pcINTEGRATOR_Log..wrk_Debug; Return ResultTypeBM = 32'
+						EXEC [dbo].[spSet_wrk_Debug]
+							@UserID = @UserID,
+							@InstanceID = @InstanceID,
+							@VersionID = @VersionID,
+							@DatabaseName = @DatabaseName,
+							@CalledProcedureName = @ProcedureName,
+							@Comment = 'Return ResultTypeBM = 32', 
+							@SQLStatement = @SQLStatement
+					END
+				ELSE
+					PRINT @SQLStatement
+
+				EXEC (@SQLStatement)
+			END
+
+	SET @Step = '@ResultTypeBM & 64, Comment'
+		IF @ResultTypeBM & 64 > 0 AND @DataClassTypeID = -1
+			BEGIN
+				SET @SQLStatement = '			
+					SELECT
+						[ResultTypeBM] = 64,' + @SQL_Select2 + '
+						[Comment] = MAX([' + @DataClassName + '_Text])
+					FROM
+						' + @CallistoDatabase + '.[dbo].[FACT_' + @DataClassName + '_text] DC
+						INNER JOIN #Time [Time] ON [Time].[MemberID] = DC.[' + @TimeType + '_MemberId]' + @SQL_Join2 + '
+					WHERE
+						' + @SQL_Where_Total + '
+						DC.BusinessProcess_MemberId <> 118 AND
+						LEN([' + @DataClassName + '_Text]) > 0
+					' + CASE WHEN LEN(@SQL_GroupBy2) > 0 THEN 'GROUP BY' + @SQL_GroupBy2 + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) ELSE '' END
+
+				IF @DebugBM & 2 > 0 AND LEN(@SQLStatement) > 4000 
+					BEGIN
+						PRINT 'Length of @SQLStatement more than 4000, see pcINTEGRATOR_Log..wrk_Debug; Return ResultTypeBM = 64'
+						EXEC [dbo].[spSet_wrk_Debug]
+							@UserID = @UserID,
+							@InstanceID = @InstanceID,
+							@VersionID = @VersionID,
+							@DatabaseName = @DatabaseName,
+							@CalledProcedureName = @ProcedureName,
+							@Comment = 'Return ResultTypeBM = 64', 
+							@SQLStatement = @SQLStatement
+					END
+				ELSE IF @DebugBM & 2 > 0
+					PRINT @SQLStatement
+				
+				EXEC (@SQLStatement)
+				SET @Selected = @Selected + @@ROWCOUNT
+			END
+
+	SET @Step = '@ResultTypeBM & 768'
+		IF @ResultTypeBM & 768 > 0
+			BEGIN
+				SET @SQLStatement = '
+					SELECT
+						' + @SQL_Select1 + '
+						[' + @Measure + '_Value] = SUM(DC.[' + @Measure + '_Value])
+					INTO
+						' + @TmpGlobalTable + '
+					FROM
+						[' + @CallistoDatabase + '].[dbo].[FACT_' + @DataClassName + '_default_partition] DC WITH (INDEX([NCCSI_' + @DataClassName + ']))
+						INNER JOIN #Time T ON T.[MemberId] = DC.[' + @TimeType + '_MemberId]' + CASE WHEN @MultiDimYN <> 0 THEN @SQL_MultiDimJoin ELSE '' END + '
+						--INNER JOIN #RowListChildren RLC ON RLC.Leaf_MemberID = MD.[Leaf_MemberId]
+					WHERE
+						' + @SQL_Where_Total + '
+						1 = 1
+					GROUP BY
+						' + @SQL_GroupBy1 + '
+					HAVING
+						ROUND(SUM(DC.' + @Measure + '_Value), 4) <> 0.0'
+
+				IF @DebugBM & 2 > 0 PRINT @SQLStatement
+				EXEC (@SQLStatement)
+
+				IF @DebugBM & 2 > 0 EXEC('SELECT TempTable = ''' + @TmpGlobalTable + ''', * FROM ' + @TmpGlobalTable)
+			END
+
+	SET @Step = '@ResultTypeBM & 256'
+		IF @ResultTypeBM & 256 > 0
+			BEGIN
+				IF CURSOR_STATUS('global','RowListChildren_Cursor') >= -1 DEALLOCATE RowListChildren_Cursor
+				DECLARE RowListChildren_Cursor CURSOR FOR
+					SELECT 
+						[DimensionID],
+						[DimensionName],
+						[RowList_MemberKey] = [Filter],
+						[LeafLevelFilter],
+						[SortOrder]
+					FROM
+						#FilterTable FT
+					WHERE
+						FT.[StepReference] = 'RowList' AND
+						FT.[TupleNo] = 1 AND
+						FT.[LeafLevelFilter] <> '-999'
+					ORDER BY
+						FT.[SortOrder]
+
+					OPEN RowListChildren_Cursor
+					FETCH NEXT FROM RowListChildren_Cursor INTO @DimensionID, @DimensionName, @RowListMemberKey, @LeafLevelFilter, @SortOrder
+
+					WHILE @@FETCH_STATUS = 0
+						BEGIN
+							IF @DebugBM & 2 > 0 SELECT [@DimensionID] = @DimensionID, [@DimensionName] = @DimensionName, [@RowListMemberKey] = @RowListMemberKey, [@LeafLevelFilter] = @LeafLevelFilter, [@SortOrder] = @SortOrder
+
+							TRUNCATE TABLE #FilterList
+
+							INSERT INTO #FilterList
+								(
+								[Filter]
+								)
+							SELECT
+								[Filter] = [Value]
+							FROM
+								STRING_SPLIT(@LeafLevelFilter, ',')
+
+							IF @DebugBM & 2 > 0 SELECT [TempTable] = '#FilterList', * FROM #FilterList ORDER BY [SortOrder]
+							
+							SET @SQLStatement = '
+								INSERT INTO #RowListChildren
+									(
+									[DimensionID],
+									[DimensionName],
+									[RowList_MemberID],
+									[RowList_MemberKey],
+									[RowList_Description],
+									[Leaf_MemberId],
+									[SortOrder]
+									)
+								SELECT
+									[DimensionID] = ' + CONVERT(nvarchar(15), @DimensionID) + ',
+									[DimensionName] = ''' + @DimensionName + ''',
+									[RowList_MemberID] = S.[MemberId],
+									[RowList_MemberKey] = ''' + @RowListMemberKey + ''',
+									[RowList_Description] = S.[Description],
+									[Leaf_MemberId] = FL.[Filter],
+									[SortOrder] = ' + CONVERT(nvarchar(15), @SortOrder) + '
+								FROM
+									#FilterList FL
+									INNER JOIN [' + @CallistoDatabase + '].[dbo].[S_DS_' + @DimensionName + '] S ON S.[Label] = ''' + @RowListMemberKey + ''''
+
+							IF @DebugBM & 2 > 0 PRINT @SQLStatement
+							EXEC (@SQLStatement)
+
+							FETCH NEXT FROM RowListChildren_Cursor INTO @DimensionID, @DimensionName, @RowListMemberKey, @LeafLevelFilter, @SortOrder
+						END
+
+				CLOSE RowListChildren_Cursor
+				DEALLOCATE RowListChildren_Cursor							
+
+				IF @DebugBM & 2 > 0 SELECT 'Arne2'
+				
+				IF @DebugBM & 2 > 0 SELECT [TempTable] = '#RowListChildren', * FROM #RowListChildren ORDER BY DimensionID, RowList_MemberId, Leaf_MemberId, [SortOrder]
+
+				IF LEN(@SQL_Tuple) > 1 SET @SQL_Tuple = LEFT(@SQL_Tuple, LEN(@SQL_Tuple) -1)
+
+				IF @DebugBM & 2 > 0 SELECT [@SQL_Tuple] = @SQL_Tuple
+
+				SELECT @SQL_Join_RLC = @SQL_Join_RLC + '(RLC.[DimensionName]=''' + sub.[DimensionName] + ''' AND RLC.[Leaf_MemberID] = DC.[' + sub.[DimensionName] + '_MemberId]) OR'
+				FROM
+					(
+					SELECT DISTINCT [DimensionName] FROM #RowListChildren
+					) sub
+
+				IF @DebugBM & 2 > 0 SELECT [@SQL_Join_RLC] = @SQL_Join_RLC
+
+				IF LEN(@SQL_Join_RLC) >= 3
+					SET @SQL_Join_RLC = LEFT(@SQL_Join_RLC, LEN(@SQL_Join_RLC) -3)
+
+				IF @DebugBM & 32 > 0 SELECT [@SQL_Join_RLC] = @SQL_Join_RLC
+				
+				SET @SQLStatement = '
+					SELECT
+						[ResultTypeBM] = 256,
+						[RowList_MemberKey] = RLC.[RowList_MemberKey],
+						[RowList_Description] = RLC.[RowList_Description],' + @SQL_Select2 + @SQL_Tuple + '
+					FROM
+						' + @TmpGlobalTable + ' DC
+						INNER JOIN #RowListChildren RLC ON ' + @SQL_Join_RLC + '
+						INNER JOIN #Time [TimeView] ON [TimeView].[MemberID] = DC.[' + @TimeType + '_MemberId]
+						INNER JOIN #Time [Time] ON 1 = 1' + @SQL_Join2 + '
+					GROUP BY
+						RLC.[RowList_MemberKey],
+						RLC.[RowList_Description]' + @SQL_GroupBy2 + '
+					ORDER BY
+						MAX(RLC.[SortOrder]),
+						RLC.[RowList_MemberKey],
+						RLC.[RowList_Description]' + @SQL_GroupBy2
+
+				IF @DebugBM & 2 > 0 PRINT @SQLStatement
+				EXEC(@SQLStatement)
+				SET @Selected = @@ROWCOUNT
+			END
+
+	SET @Step = '@ResultTypeBM & 512'
+		IF @ResultTypeBM & 512 > 0
+			BEGIN
+				CREATE TABLE #Hierarchy
+					(
+					[MemberId] bigint,
+					[MemberKey] nvarchar(100) COLLATE DATABASE_DEFAULT,	
+					[Description] nvarchar(255) COLLATE DATABASE_DEFAULT,	
+					[ParentMemberId] bigint,
+					[Level] int,
+					[NodeTypeBM] int,
+					[Path] nvarchar(1000) COLLATE DATABASE_DEFAULT
+					)
+
+				TRUNCATE TABLE #PipeStringSplit
+				
+				EXEC [dbo].[spGet_PipeStringSplit]
+					@UserID = @UserID,
+					@InstanceID = @InstanceID,
+					@VersionID = @VersionID,
+					@PipeString = @RowList
+
+				IF @DebugBM & 2 > 0 SELECT TempTable = '#PipeStringSplit', * FROM #PipeStringSplit
+
+				SELECT
+					@HierarchyDimension = CASE WHEN CHARINDEX(':', [PipeObject]) = 0 THEN [PipeObject] ELSE LEFT([PipeObject], CHARINDEX(':', [PipeObject]) -1) END,
+					@HierarchyHierarchy = CASE WHEN CHARINDEX(':', [PipeObject]) = 0 THEN [PipeObject] ELSE SUBSTRING([PipeObject], CHARINDEX(':', [PipeObject]) + 1, LEN([PipeObject])) END,
+					@HierarchyTopMember = ISNULL([PipeFilter], 'All_')
+				FROM
+					#PipeStringSplit
+				WHERE
+					[PipeObject] NOT IN ('SupressZeroYN', 'ShowLevel', 'ExcludeStartNodeYN', 'ExcludeSumMemberYN', 'ParentSorting')
+
+				IF @HierarchyHierarchy = '0' SET @HierarchyHierarchy = @HierarchyDimension
+				
+				IF ISNUMERIC(@HierarchyHierarchy) <> 0
+					SELECT
+						@HierarchyHierarchy = DH.[HierarchyName]
+					FROM
+						[pcINTEGRATOR].[dbo].[Dimension] D
+						INNER JOIN [pcINTEGRATOR].[dbo].[DimensionHierarchy] DH ON DH.[InstanceID] = @InstanceID AND DH.[VersionID] = @VersionID AND DH.[DimensionID] = D.[DimensionID] AND CONVERT(nvarchar(15), DH.[HierarchyNo]) = @HierarchyHierarchy
+					WHERE
+						D.[InstanceID] IN (0, @InstanceID) AND 
+						D.[DimensionName] = @HierarchyDimension AND
+						D.[SelectYN] <> 0 AND
+						D.[DeletedID] IS NULL
+
+				IF @DebugBM & 2 > 0 
+					SELECT
+						[@HierarchyDimension] = @HierarchyDimension,
+						[@HierarchyHierarchy] = @HierarchyHierarchy,
+						[@HierarchyTopMember] = @HierarchyTopMember,
+						[@RowList_SupressZeroYN] = @RowList_SupressZeroYN,
+						[@RowList_ShowLevel] = @RowList_ShowLevel,
+						[@RowList_ExcludeStartNodeYN] = @RowList_ExcludeStartNodeYN,
+						[@RowList_ExcludeSumMemberYN] = @RowList_ExcludeSumMemberYN,
+						[@RowList_ParentSorting] = @RowList_ParentSorting
+				
+				SET @SQLStatement = '
+					;WITH cte AS
+					(
+					SELECT
+						[MemberId] = d.[MemberId], 
+						[ParentMemberId] = h.[ParentMemberId], 
+						[SortOrder] = h.[SequenceNumber], 
+						[Depth] = 0,
+						[Path] = RIGHT(''0000'' + CONVERT(nvarchar(MAX), h.[SequenceNumber]), 5)
+					FROM
+						[' + @CallistoDatabase + '].[dbo].[S_DS_' + @HierarchyDimension + '] d
+						INNER JOIN [' + @CallistoDatabase + '].[dbo].[S_HS_' + @HierarchyDimension + '_' + @HierarchyHierarchy + '] h ON h.[MemberId] = d.[MemberId]
+					WHERE
+						d.[Label] = ''' + @HierarchyTopMember + '''
+					UNION ALL
+					SELECT
+						[MemberId] = h.[MemberId], 
+						[ParentMemberId] = h.[ParentMemberId], 
+						[SortOrder] = h.[SequenceNumber], 
+						[Depth] = c.[Depth] + 1,
+						[Path] = c.[Path] + N''|'' + RIGHT(''0000'' + CONVERT(nvarchar(MAX), h.[SequenceNumber]), 5)
+					FROM
+						[' + @CallistoDatabase + '].[dbo].[S_HS_' + @HierarchyDimension + '_' + @HierarchyHierarchy + '] h
+						INNER JOIN cte c on c.[MemberId] = h.[ParentMemberId]
+					)
+					INSERT INTO #Hierarchy
+						(
+						[MemberId],
+						[MemberKey],	
+						[Description],	
+						[ParentMemberId],
+						[Level],
+						[NodeTypeBM],
+						[Path]
+						)
+					SELECT
+						[MemberId] = d.[MemberId],
+						[MemberKey] = d.[Label],	
+						[Description] = d.[Description],	
+						[ParentMemberId] = c.[ParentMemberId],
+						[Level] = c.[Depth],
+						[NodeTypeBM] = CASE WHEN d.[RNodeType] LIKE ''%L%'' THEN 1 ELSE 2 END,
+						[Path] = c.[Path]
+					FROM
+						[' + @CallistoDatabase + '].[dbo].[S_DS_' + @HierarchyDimension + '] d
+						INNER JOIN cte c ON c.MemberId = d.MemberId'
+
+				IF @DebugBM & 2 > 0 PRINT @SQLStatement
+				EXEC(@SQLStatement)
+
+				IF @DebugBM & 2 > 0 
+					BEGIN
+						SET @SQLStatement = 'SELECT TempTable = ''#Hierarchy'', * FROM #Hierarchy ORDER BY [Path] '
+						EXEC(@SQLStatement)
+						SET @SQLStatement = 'SELECT TempTable = ''#Hierarchy'', * FROM #Hierarchy ORDER BY [MemberId] '
+						EXEC(@SQLStatement)
+					END
+
+				SET @SQLStatement = '
+					SELECT
+						[RowList_MemberID] = H.[MemberID],
+						[RowList_MemberKey] = MAX(H.[MemberKey]),
+						[RowList_Description] = MAX(H.[Description]),' + @SQL_Select2 + @SQL_Tuple + '
+						[ParentMemberId] = MAX(H.[ParentMemberId]),
+						[Level] = MAX(H.[Level]),
+						[NodeTypeBM] = MAX(H.[NodeTypeBM]),
+						[Path] = MAX(H.[Path])
+					INTO ' + @TmpGlobalTable_2 + '
+					FROM
+						#Hierarchy H 
+						LEFT JOIN ' + @TmpGlobalTable + ' DC ON DC.[' + @HierarchyDimension + '_MemberId] = H.MemberID
+						LEFT JOIN #Time [TimeView] ON [TimeView].[MemberID] = DC.[' + @TimeType + '_MemberId]
+						LEFT JOIN #Time [Time] ON 1 = 1
+						'  + @SQL_Join2 + '
+					GROUP BY
+						H.[MemberID]' + CASE WHEN LEN(@SQL_GroupBy2) > 0 THEN ',' ELSE '' END + @SQL_GroupBy2
+
+--' + @SQL_Join2 + '
+
+				IF @DebugBM & 2 > 0 PRINT @SQLStatement
+				EXEC(@SQLStatement)
+				IF @DebugBM & 2 > 0 EXEC ('SELECT TempTable=''' + @TmpGlobalTable_2 + ''', Step=1, * FROM ' + @TmpGlobalTable_2)
+
+				--'Aggregation_Cursor'
+				CREATE TABLE #Aggregation_Cursor_Table
+					(
+					[Level] int,
+					[MemberId] bigint
+					)
+
+				SET @SQLStatement = '
+					INSERT INTO #Aggregation_Cursor_Table
+						(
+						[Level],
+						[MemberId]
+						)
+					SELECT DISTINCT
+						[Level],
+						[MemberId] = [RowList_MemberId]
+					FROM
+						' + @TmpGlobalTable_2 + '
+					WHERE
+						NodeTypeBM & 2 > 0'
+
+				EXEC(@SQLStatement)
+
+				SELECT	
+					@AggregationSet = @AggregationSet + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + '[' + sub.[ObjectReference] + '] = sub.[' + sub.[ObjectReference] + '],',
+					@AggregationSum = @AggregationSum + CHAR(13) + CHAR(10) + CHAR(9) + CHAR(9) + CHAR(9) + CHAR(9) + '[' + sub.[ObjectReference] + '] = SUM([' + sub.[ObjectReference] + ']),'
+				FROM
+					(
+					SELECT 
+						[ObjectReference] = 'T_' + FT.[ObjectReference],
+						[SortOrder] = MAX(FT.[TupleNo])
+					FROM
+						#FilterTable FT
+					WHERE
+						FT.[StepReference] = @StepReference AND
+						FT.[ObjectReference] IS NOT NULL
+					GROUP BY
+						FT.[ObjectReference]
+					) sub
+				ORDER BY
+					sub.[SortOrder]
+
+				SELECT
+					@AggregationSet = CASE WHEN LEN(@AggregationSet) > 1 THEN LEFT(@AggregationSet, LEN(@AggregationSet) - 1) ELSE '' END,
+					@AggregationSum = CASE WHEN LEN(@AggregationSum) > 1 THEN LEFT(@AggregationSum, LEN(@AggregationSum) - 1) ELSE '' END
+
+				IF CURSOR_STATUS('global','Aggregation_Cursor') >= -1 DEALLOCATE Aggregation_Cursor
+				DECLARE Aggregation_Cursor CURSOR FOR
+			
+					SELECT DISTINCT
+						[Level],
+						[MemberId]
+					FROM
+						#Aggregation_Cursor_Table
+					ORDER BY
+						[Level] DESC,
+						[MemberId]
+
+					EXEC(@SQLStatement)
+
+					OPEN Aggregation_Cursor
+					FETCH NEXT FROM Aggregation_Cursor INTO @Level, @MemberId
+
+					WHILE @@FETCH_STATUS = 0
+						BEGIN
+							IF @DebugBM & 32 > 0 SELECT [@Level]=@Level, [@MemberId] = @MemberId
+
+							IF LEN(@AggregationSet) > 0
+								BEGIN
+									SET @SQLStatement = '
+										UPDATE RS
+										SET
+											' + @AggregationSet + '
+										FROM
+											' + @TmpGlobalTable_2 + ' RS
+											INNER JOIN 
+												(
+												SELECT
+													' + @AggregationSum + '
+												FROM
+													' + @TmpGlobalTable_2 + '
+												WHERE
+													[ParentMemberID] = ' + CONVERT(nvarchar(15), @MemberID) + '
+												) sub ON 1 = 1
+										WHERE
+											RS.[RowList_MemberID] = ' + CONVERT(nvarchar(15), @MemberID)
+
+									IF @DebugBM & 32 > 0 PRINT @SQLStatement
+									EXEC (@SQLStatement)
+								END
+
+							FETCH NEXT FROM Aggregation_Cursor INTO @Level, @MemberId
+						END
+
+				CLOSE Aggregation_Cursor
+				DEALLOCATE Aggregation_Cursor
+
+				SET @SQLStatement = '
+					SELECT
+						[ResultTypeBM] = 512,
+						sub.*
+					FROM
+						(
+						SELECT DISTINCT
+							T.*,
+							[DESC] = CASE WHEN [Section].[ParentMemberId] = T.[ParentMemberId] THEN LEFT([Path], LEN([Path])-5) ELSE [Path] END,
+							[Sequence] = RIGHT([Path], 5)
+						FROM
+							' + @TmpGlobalTable_2 + ' T
+							LEFT JOIN
+								(
+								SELECT
+									[ParentMemberId]
+								FROM
+									' + @TmpGlobalTable_2 + '
+								GROUP BY
+									[ParentMemberId]
+								--HAVING
+								--	COUNT(1) > 1
+								) [Section] ON  [Section].[ParentMemberId] = T.[ParentMemberId] --IN (T.[ParentMemberId], T.[RowList_MemberID])
+						WHERE
+							([Level] <> 0 OR ' + CONVERT(nvarchar(15), CONVERT(int, @RowList_ExcludeStartNodeYN)) + ' = 0) AND
+							([Level] <= ' + CONVERT(nvarchar(15), @RowList_ShowLevel) + ' OR ' + CONVERT(nvarchar(15), @RowList_ShowLevel) + ' = 0) AND
+							([Level] = ' + CONVERT(nvarchar(15), @RowList_ShowLevel) + ' OR ([NodeTypeBM] & 1 > 0 AND [Level] < ' + CONVERT(nvarchar(15), @RowList_ShowLevel) + ') OR ' + CONVERT(nvarchar(15), CONVERT(int, @RowList_ExcludeSumMemberYN)) + ' = 0)' + @SupressZeroString + '
+						) sub
+					ORDER BY
+						' + CASE WHEN @RowList_ParentSorting = 'After' THEN '[DESC] DESC, [Sequence] ASC' ELSE '[Path]' END
+
+				IF @DebugBM & 2 > 0 PRINT @SQLStatement
+				EXEC(@SQLStatement)
+				SET @Selected = @@ROWCOUNT
+			END
+
+	SET @Step = 'Drop temp tables'
+		DROP TABLE #FilterTable
+		DROP TABLE #Time
+		IF @MultiDimYN <> 0
+			BEGIN
+				DROP TABLE #MultiDim
+				SET @SQLStatement = 'DROP TABLE ' + @TmpGlobalTable EXEC (@SQLStatement)
+			END
+		IF @ResultTypeBM & 32 > 0
+			BEGIN
+				SET @SQLStatement = 'DROP TABLE ' + @TmpGlobalTable_32 EXEC (@SQLStatement)
+				--SELECT [@TmpGlobalTable_32] = @TmpGlobalTable_32
+				--SELECT @SQLStatement
+				--EXEC (@SQLStatement)
+			END
+
+	SET @Step = 'Set @Duration'
+		SET @Duration = GetDate() - @StartTime
+
+	SET @Step = 'Insert into JobLog'
+		IF @SetJobLogYN <> 0 OR (@Deleted + @Inserted + @Updated) <> 0
+			EXEC [pcINTEGRATOR].[dbo].[spSet_JobLog] @UserID = @UserID, @InstanceID = @InstanceID, @VersionID = @VersionID, @JobID = @JobID, @JobLogID = @JobLogID, @LogStartTime = @StartTime, @ProcedureID = @ProcedureID, @ProcedureName = @ProcedureName, @Duration = @Duration, @Deleted = @Deleted, @Inserted = @Inserted, @Updated = @Updated, @Selected = @Selected, @ErrorNumber = @ErrorNumber, @LogVersion = @Version, @UserName = @UserName, @AuthenticatedUserID = @AuthenticatedUserID
+END TRY
+
+BEGIN CATCH
+	SELECT @Duration = GetDate() - @StartTime, @ErrorNumber = ERROR_NUMBER(), @ErrorSeverity = ERROR_SEVERITY(), @ErrorState = ERROR_STATE(), @ErrorProcedure = ERROR_PROCEDURE(), @ErrorLine = ERROR_LINE(), @ErrorMessage = ERROR_MESSAGE()
+	EXEC [pcINTEGRATOR].[dbo].[spSet_JobLog] @UserID = @UserID, @InstanceID = @InstanceID, @VersionID = @VersionID, @JobID = @JobID, @JobLogID = @JobLogID, @LogStartTime = @StartTime, @ProcedureID = @ProcedureID, @ProcedureName = @ProcedureName, @Duration = @Duration, @Deleted = @Deleted, @Inserted = @Inserted, @Updated = @Updated, @Selected = @Selected, @ErrorNumber = @ErrorNumber, @ErrorSeverity = @ErrorSeverity, @ErrorState = @ErrorState, @ErrorProcedure = @ErrorProcedure, @ErrorStep = @Step, @ErrorLine = @ErrorLine, @ErrorMessage = @ErrorMessage, @LogVersion = @Version, @UserName = @UserName, @AuthenticatedUserID = @AuthenticatedUserID
+	
+	RETURN @ErrorNumber
+END CATCH
+
+SET @Step = 'Define exit point'
+	EXITPOINT:
+	RAISERROR (@Message, @Severity, 100)
+
+--GO
+
+--EXEC [pcINTEGRATOR].[dbo].[spPortalGet_DataClass_Data_New] @ActingAs='3328',@DataClassID='5656',
+--@Filter='Account=SalesAmount_|AccountManager=All_|BusinessProcess=CONSOLIDATED|BusinessRule=All_|COGSAccount=All_|Currency=SEK|Customer=All_|CustomerCategory=All_|Entity=SE556133731101|GL_Lager=All_|GL_Marknadsområde=All_|InvoiceNo_AR=All_|OrderState=60|OrderType=All_|Product=All_|ProductGroup=All_|RevenueAccount=All_|Scenario=ACTUAL|TimeDay=202101|TimeView=Periodic|Time=All_',
+--@GroupBy='TimeDay.TimeMonth|Customer',@InstanceID='533',@Measure='Sales',@ResultTypeBM='4',@UseCacheYN='true',@UserID='7806',@VersionID='1058', @DebugBM=3
+GO

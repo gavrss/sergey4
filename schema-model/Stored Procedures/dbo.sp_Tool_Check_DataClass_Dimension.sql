@@ -1,0 +1,208 @@
+SET QUOTED_IDENTIFIER ON
+GO
+SET ANSI_NULLS ON
+GO
+CREATE PROCEDURE [dbo].[sp_Tool_Check_DataClass_Dimension]
+	@UserID int = NULL,
+	@InstanceID int = NULL,
+	@VersionID int = NULL,
+
+	--SP-specific parameters
+	@DataClassName nvarchar(100) = NULL,
+	@DimensionName nvarchar(100) = NULL,
+
+	@JobID int = NULL,
+	@JobLogID int = NULL,
+	@Rows int = NULL,
+	@ProcedureID int = 880000523,
+	@StartTime datetime = NULL,
+	@Duration time(7) = '00:00:00' OUT,
+	@Deleted int = 0 OUT,
+	@Inserted int = 0 OUT,
+	@Updated int = 0 OUT,
+	@Selected int = 0 OUT,
+	@GetVersion bit = 0,
+	@Debug bit = 0, --1=Set @DebugBM to 3
+	@DebugBM int = 0 --1=High Prio, 2=Low Prio, 4=Sub routines
+
+--#WITH ENCRYPTION#--
+
+AS
+/*
+EXEC [sp_Tool_Check_DataClass_Dimension] @UserID=-10, @InstanceID=390, @VersionID=1011, @DataClassName = 'Financials', @DimensionName = 'WorkflowState', @Debug=1
+
+EXEC [sp_Tool_Check_DataClass_Dimension] @GetVersion = 1
+*/
+
+SET ANSI_WARNINGS OFF
+
+DECLARE
+	--SP-specific variables
+	@CallistoDatabase nvarchar(100),
+	@SQLStatement nvarchar(max),
+	@DimensionID int,
+	@DataClassID int,
+
+	@Step nvarchar(255),
+	@Message nvarchar(500) = '',
+	@Severity int = 0,
+	@UserName nvarchar(100),
+	@DatabaseName nvarchar(100),
+	@ProcedureName nvarchar(100),
+	@DebugSub bit = 0,
+	@ErrorNumber int = 0,
+	@ErrorSeverity int,
+	@ErrorState int,
+	@ErrorProcedure nvarchar(128),
+	@ErrorLine int,
+	@ErrorMessage nvarchar(4000), 
+	@ProcedureDescription nvarchar(1024),
+	@MandatoryParameter nvarchar(1000),
+	@Description nvarchar(255),
+	@ToBeChanged nvarchar(255) = '',
+	@CreatedBy nvarchar(50) = 'JaWo',
+	@ModifiedBy nvarchar(50) = 'NeHa',
+	@Version nvarchar(50) = '2.0.2.2150'
+
+IF @GetVersion <> 0
+	BEGIN
+		SELECT
+			@ProcedureName = OBJECT_NAME(@@PROCID),
+			@ProcedureDescription = 'Check existence of specific dimension in dataclass. Add if missing.',
+			@MandatoryParameter = '' --Without @, separated by |
+
+		IF @Version = '2.0.2.2150' SET @Description = 'DB-243: Procedure created. DB-245: Added INSERT INTO Dimension_StorageType.'
+
+		EXEC [spSet_Procedure] @CalledProcedureID = @ProcedureID, @CalledProcedureName = @ProcedureName, @CalledProcedureDescription = @ProcedureDescription, @CalledMandatoryParameter = @MandatoryParameter, @CalledVersion = @Version, @CalledVersionDescription = @Description, @CalledCreatedBy = @CreatedBy, @CalledModifiedBy =  @ModifiedBy
+		RETURN
+	END
+
+SET NOCOUNT ON 
+
+BEGIN TRY
+	SET @Step = 'Set @StartTime'
+		SET @StartTime = ISNULL(@StartTime, GETDATE())
+
+	SET @Step = 'Set procedure variables'
+		SELECT
+			@JobID = ISNULL(@JobID, @ProcedureID),
+			@DatabaseName = DB_NAME(),
+			@ProcedureName = OBJECT_NAME(@@PROCID),
+			@Deleted = ISNULL(@Deleted, 0),
+			@Inserted = ISNULL(@Inserted, 0),
+			@Updated = ISNULL(@Updated, 0),
+			@Selected = ISNULL(@Selected, 0)
+
+		SET @UserName = ISNULL(@UserName, suser_name())
+
+		IF @Debug <> 0 SET @DebugBM = 3
+		IF @DebugBM & 4 > 0 SET @DebugSub = 1
+
+		SELECT
+			@DimensionID = DimensionID
+		FROM
+			[@Template_Dimension]
+		WHERE
+			DimensionName = @DimensionName
+
+	SET @Step = 'CallistoDB_Cursor'
+		IF CURSOR_STATUS('global','CallistoDB_Cursor') >= -1 DEALLOCATE CallistoDB_Cursor
+		DECLARE CallistoDB_Cursor CURSOR FOR
+			
+			SELECT DISTINCT
+				A.InstanceID,
+				A.VersionID,
+				CallistoDatabase = A.[DestinationDatabase],
+				DataClassID
+			FROM
+				[Application] A
+				INNER JOIN sys.databases db ON db.[name] = A.[DestinationDatabase]
+				INNER JOIN DataClass DC ON DC.InstanceID = A.InstanceID AND DC.VersionID = A.VersionID AND DC.DataClassName = @DataClassName
+			ORDER BY
+				A.[DestinationDatabase]
+
+			OPEN CallistoDB_Cursor
+			FETCH NEXT FROM CallistoDB_Cursor INTO @InstanceID, @VersionID, @CallistoDatabase, @DataClassID
+
+			WHILE @@FETCH_STATUS = 0
+				BEGIN
+					IF @Debug <> 0 SELECT [@InstanceID] = @InstanceID, [@VersionID] = @VersionID, [@CallistoDatabase] = @CallistoDatabase, [@DataClassID] = @DataClassID
+
+						--INSERT INTO Dimension_StorageType
+						SET @SQLStatement = '
+						
+							INSERT INTO pcINTEGRATOR_Data.dbo.Dimension_StorageType
+								(
+								InstanceID,
+								VersionID,
+								DimensionID,
+								StorageTypeBM
+								)
+							SELECT DISTINCT
+								InstanceID = ' + CONVERT(nvarchar(15), @InstanceID) + ',
+								VersionID = ' + CONVERT(nvarchar(15), @VersionID) + ',
+								DimensionID = ' + CONVERT(nvarchar(15), @DimensionID) + ',
+								StorageTypeBM = 4
+							FROM
+								' + @CallistoDatabase + '.sys.tables t
+								INNER JOIN ' + @CallistoDatabase + '.sys.columns c ON c.object_id = t.object_id AND c.[name] = ''' + @DimensionName + '_MemberId''
+							WHERE
+								t.[name] = ''FACT_' + @DataClassName + '_default_partition'' AND
+								NOT EXISTS (SELECT 1 FROM pcINTEGRATOR_Data.dbo.Dimension_StorageType D WHERE D.InstanceID = ' + CONVERT(nvarchar(15), @InstanceID) + ' AND D.VersionID = ' + CONVERT(nvarchar(15), @VersionID) + ' AND D.DimensionID = ' + CONVERT(nvarchar(15), @DimensionID) + ')'
+
+						IF @Debug <> 0 PRINT @SQLStatement
+						EXEC (@SQLStatement)
+
+						SET @Inserted = @Inserted + @@ROWCOUNT
+
+						--INSERT INTO DataClass_Dimension
+						SET @SQLStatement = '
+						
+							INSERT INTO pcINTEGRATOR_Data.dbo.DataClass_Dimension
+								(
+								InstanceID,
+								VersionID,
+								DataClassID,
+								DimensionID
+								)
+							SELECT DISTINCT
+								InstanceID = ' + CONVERT(nvarchar(15), @InstanceID) + ',
+								VersionID = ' + CONVERT(nvarchar(15), @VersionID) + ',
+								DataClassID = ' + CONVERT(nvarchar(15), @DataClassID) + ',
+								DimensionID = ' + CONVERT(nvarchar(15), @DimensionID) + '
+							FROM
+								' + @CallistoDatabase + '.sys.tables t
+								INNER JOIN ' + @CallistoDatabase + '.sys.columns c ON c.object_id = t.object_id AND c.[name] = ''' + @DimensionName + '_MemberId''
+							WHERE
+								t.[name] = ''FACT_' + @DataClassName + '_default_partition'' AND
+								NOT EXISTS (SELECT 1 FROM pcINTEGRATOR_Data.dbo.DataClass_Dimension D WHERE D.InstanceID = ' + CONVERT(nvarchar(15), @InstanceID) + ' AND D.VersionID = ' + CONVERT(nvarchar(15), @VersionID) + ' AND D.DataClassID = ' + CONVERT(nvarchar(15), @DataClassID) + ' AND D.DimensionID = ' + CONVERT(nvarchar(15), @DimensionID) + ')'
+
+						IF @Debug <> 0 PRINT @SQLStatement
+						EXEC (@SQLStatement)
+
+						SET @Inserted = @Inserted + @@ROWCOUNT
+
+					FETCH NEXT FROM CallistoDB_Cursor INTO @InstanceID, @VersionID, @CallistoDatabase, @DataClassID
+				END
+
+		CLOSE CallistoDB_Cursor
+		DEALLOCATE CallistoDB_Cursor
+
+	SET @Step = 'Set @Duration'
+		SET @Duration = GetDate() - @StartTime
+
+	SET @Step = 'Insert into JobLog'
+		EXEC [spSet_JobLog] @UserID = @UserID, @InstanceID = @InstanceID, @VersionID = @VersionID, @JobID = @JobID, @JobLogID = @JobLogID, @LogStartTime = @StartTime, @ProcedureName = @ProcedureName, @Duration = @Duration, @Deleted = @Deleted, @Inserted = @Inserted, @Updated = @Updated, @Selected = @Selected, @ErrorNumber = @ErrorNumber, @LogVersion = @Version, @UserName = @UserName
+END TRY
+
+BEGIN CATCH
+	SELECT @Duration = GetDate() - @StartTime, @ErrorNumber = ERROR_NUMBER(), @ErrorSeverity = ERROR_SEVERITY(), @ErrorState = ERROR_STATE(), @ErrorProcedure = ERROR_PROCEDURE(), @ErrorLine = ERROR_LINE(), @ErrorMessage = ERROR_MESSAGE()
+	EXEC [spSet_JobLog] @UserID = @UserID, @InstanceID = @InstanceID, @VersionID = @VersionID, @JobID = @JobID, @JobLogID = @JobLogID, @LogStartTime = @StartTime, @ProcedureName = @ProcedureName, @Duration = @Duration, @Deleted = @Deleted, @Inserted = @Inserted, @Updated = @Updated, @Selected = @Selected, @ErrorNumber = @ErrorNumber, @ErrorSeverity = @ErrorSeverity, @ErrorState = @ErrorState, @ErrorProcedure = @ErrorProcedure, @ErrorStep = @Step, @ErrorLine = @ErrorLine, @ErrorMessage = @ErrorMessage, @LogVersion = @Version, @UserName = @UserName
+	SELECT ErrorNumber = @ErrorNumber, ErrorSeverity = @ErrorSeverity, ErrorState = @ErrorState, ErrorProcedure = @ErrorProcedure, ErrorStep = @Step, ErrorLine = @ErrorLine, ErrorMessage = @ErrorMessage
+	RETURN @ErrorNumber
+END CATCH
+
+SET @Step = 'Define exit point'
+	EXITPOINT:
+	RAISERROR (@Message, @Severity, 100)
+GO

@@ -1,0 +1,3 @@
+CREATE SCHEMA [DataSync]
+AUTHORIZATION [dbo]
+GO
